@@ -8,7 +8,7 @@ Une application Windows portable, avec une interface en français et une icône 
 
 ## Télécharger
 
-Télécharger **[AMZ.ScreenSize.exe dans la dernière release](https://github.com/4MZ31/AMZ.ScreenSize/releases/latest)**, ou l’archive ZIP qui contient aussi la documentation. Ce dépôt est privé : une connexion à un compte GitHub autorisé est nécessaire.
+Télécharger **[AMZ.ScreenSize.exe dans la dernière release](https://github.com/4MZ31/AMZ.ScreenSize/releases/latest)**, ou l’archive ZIP qui contient aussi la documentation. Le dépôt et les releases sont publics.
 
 L’exécutable est autonome : aucun script PowerShell ni fichier source n’est nécessaire pour l’utiliser. Il s’appuie sur .NET Framework installé dans Windows.
 
@@ -54,6 +54,18 @@ Fermer ou réduire la fenêtre conserve l’application en arrière-plan. Utilis
 
 Cocher **Lancer avec Windows** pour démarrer en arrière-plan avec la session. Conserver l’exécutable à son emplacement après avoir activé cette option ; la décocher puis la recocher actualise le chemin si le fichier a été déplacé.
 
+### Mises à jour automatiques
+
+L’option **Mises à jour automatiques** est activée par défaut et peut être décochée dans l’interface. L’application consulte la dernière release stable de ce dépôt après son lancement, puis au plus une fois par jour. Le bouton **Vérifier les mises à jour** permet de lancer une recherche manuelle.
+
+Lorsqu’une version plus récente existe, l’application télécharge l’EXE et son fichier `SHA256SUMS.txt` en HTTPS depuis les releases de `4MZ31/AMZ.ScreenSize`. Elle vérifie l’empreinte SHA-256, le nom de l’assembly et sa version avant toute installation. Les préversions, les versions anciennes et les fichiers dont la vérification échoue sont refusés.
+
+L’installation automatique attend que Counter-Strike soit fermé et que le format d’origine ait été restauré. Un assistant local remplace alors l’EXE et relance l’application, avec les mêmes préférences et le même état de fenêtre. Si l’automatisme est désactivé, une mise à jour téléchargée peut être installée avec **Installer la mise à jour**.
+
+L’ancien EXE est conservé à côté du nouveau sous le nom `AMZ.ScreenSize.exe.previous`. Un remplacement qui échoue conserve l’exécutable en place et n’est pas retenté automatiquement pendant une heure, pour éviter une boucle de redémarrages. Le journal indique le résultat. Le dossier de l’exécutable doit être accessible en écriture sans élévation ; un dossier utilisateur convient.
+
+Les empreintes détectent un téléchargement altéré ; elles ne remplacent pas une signature numérique de l’éditeur. La confiance repose sur ce dépôt GitHub et sur HTTPS.
+
 ## Compatibilité et diagnostic
 
 Le moniteur est identifié par son ID matériel `SAM727E`, indépendamment du numéro d’écran Windows. L’application refuse de sélectionner arbitrairement un écran si plusieurs modèles identiques sont connectés. Elle ne commande pas les autres moniteurs.
@@ -69,7 +81,7 @@ Les préférences et le journal local sont enregistrés ici :
 %LOCALAPPDATA%\AMZ.ScreenSize\activity.log
 ```
 
-Le bouton **Journal** ouvre le journal local. L’application ne collecte ni ne transmet de télémétrie, n’injecte aucun code dans le jeu et n’a besoin d’aucun accès réseau.
+Le bouton **Journal** ouvre le journal local. L’application ne collecte ni ne transmet de télémétrie et n’injecte aucun code dans le jeu. L’accès réseau est limité aux recherches et téléchargements de mises à jour GitHub ; le contrôle du moniteur fonctionne hors ligne.
 
 Deux commandes de diagnostic sont disponibles :
 
@@ -97,7 +109,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test -Packa
 - Tests : `bin\Release\AMZ.ScreenSize.Tests.exe`.
 - Fichiers distribuables : `dist\`.
 
-Les **30 assertions hors matériel** vérifient notamment la restauration, le changement de profil en cours de partie, les préférences persistantes, les échecs DDC/CI, la déconnexion et les erreurs d’écriture disque. Les workflows GitHub exécutent uniquement ces tests, sans écran physique.
+Les **44 assertions hors matériel** comprennent 40 vérifications de logique, de persistance et de validation des mises à jour, ainsi que quatre tests isolés du remplacement réel d’un EXE, de sa sauvegarde, de son redémarrage et du rejet d’un fichier invalide. Les workflows GitHub exécutent ces tests sans écran physique et sans modifier une installation utilisateur.
 
 Pour lancer volontairement le test matériel sur un G4 compatible, hors partie :
 
@@ -122,7 +134,7 @@ Ce test ajoute **huit assertions** de relecture, une par préréglage. Ne pas le
 2. Vérifier `build.ps1 -Test -Package`.
 3. Pousser un tag correspondant au fichier `VERSION`, par exemple `v1.0.1`.
 
-Le workflow de release recompile et teste le projet sous Windows, puis publie l’exécutable, le ZIP et `SHA256SUMS.txt`. La release reste privée, comme le dépôt.
+Le workflow de release recompile et teste le projet sous Windows, puis publie l’exécutable, le ZIP et `SHA256SUMS.txt`. Les mises à jour automatiques utilisent uniquement les releases stables publiées.
 
 ## Protocole et sources
 

@@ -13,9 +13,11 @@ Première version exécutable de **AMZ.ScreenSize**, qui succède au script Odys
 - Restauration du mode précédent à la fermeture du jeu, à la désactivation et à la fermeture de l’application.
 - Préférences persistantes et récupération d’une restauration interrompue.
 - Icône de notification, menu de choix du profil et lancement avec Windows.
+- Mises à jour automatiques depuis GitHub Releases, désactivables, avec vérification SHA-256 et installation différée après la partie.
+- Sauvegarde de l’ancien EXE, redémarrage après mise à jour et délai de reprise après échec d’installation.
 - Identification matérielle du G4 pour éviter de modifier un autre moniteur.
 - Journal local et export JSON de diagnostic.
-- Compilation sans NuGet, 30 tests hors matériel et huit tests matériels explicites.
+- Compilation sans NuGet, 44 assertions hors matériel et huit tests matériels explicites.
 - Workflows GitHub de test et de publication ; distribution EXE, ZIP et empreintes SHA-256.
 
 ### Compatibilité vérifiée

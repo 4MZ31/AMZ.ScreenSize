@@ -38,6 +38,8 @@ namespace AMZ.ScreenSize
         }
         public void SetEnabled(bool enabled)
         { AppSettings next = state.Copy(); next.Enabled = enabled; Persist(next); log("AUTOMATION enabled=" + enabled); Tick(gameRunning); }
+        public void SetAutoUpdate(bool enabled)
+        { AppSettings next = state.Copy(); next.AutoUpdate = enabled; Persist(next); log("AUTO_UPDATE enabled=" + enabled); }
         public void SetTarget(int value)
         {
             if (!ScreenPreset.IsSelectable(value)) throw new ArgumentOutOfRangeException("value");

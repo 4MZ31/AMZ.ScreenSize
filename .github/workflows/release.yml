@@ -28,11 +28,12 @@ jobs:
           $tag = $env:GITHUB_REF_NAME
           $notes = "docs/releases/$tag.md"
           if (-not (Test-Path -LiteralPath $notes)) { $notes = 'CHANGELOG.md' }
-          gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag dist/* --clobber --repo $env:GITHUB_REPOSITORY
+          $assets = @(Get-ChildItem -LiteralPath dist -File | Select-Object -ExpandProperty FullName)
+          $existing = @(gh release list --limit 100 --json tagName --repo $env:GITHUB_REPOSITORY | ConvertFrom-Json | Where-Object { $_.tagName -eq $tag })
+          if ($LASTEXITCODE -ne 0) { throw 'Could not list releases.' }
+          if ($existing.Count -gt 0) {
+            gh release upload $tag @assets --clobber --repo $env:GITHUB_REPOSITORY
           } else {
-            $assets = @(Get-ChildItem -LiteralPath dist -File | Select-Object -ExpandProperty FullName)
             gh release create $tag @assets --verify-tag --title "AMZ.ScreenSize $tag" --notes-file $notes --repo $env:GITHUB_REPOSITORY
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }

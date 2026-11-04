@@ -10,12 +10,13 @@ namespace AMZ.ScreenSize
     public sealed class AppSettings
     {
         [DataMember] public bool Enabled = true;
+        [DataMember] public bool AutoUpdate = true;
         [DataMember] public int TargetMode = 7;
         [DataMember] public int SelectedMode = 7;
         [DataMember] public bool RestorePending;
         [DataMember] public int OriginalMode = 1;
         [OnDeserializing] private void Defaults(StreamingContext context)
-        { Enabled = true; TargetMode = 7; SelectedMode = 7; OriginalMode = 1; }
+        { Enabled = true; AutoUpdate = true; TargetMode = 7; SelectedMode = 7; OriginalMode = 1; }
         public AppSettings Copy() { return (AppSettings)MemberwiseClone(); }
         public void Validate()
         {

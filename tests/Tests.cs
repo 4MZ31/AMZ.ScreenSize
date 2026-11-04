@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Drawing;
 using System.Windows.Forms;
+using System.Reflection;
 using AMZ.ScreenSize;
 
 internal static class Tests
@@ -32,6 +33,9 @@ internal static class Tests
         public void SetStartup(bool value) { }
         public void OpenLog() { }
         public void HideWindow() { }
+        public bool AutoUpdatesEnabled { get { return true; } }
+        public void SetAutoUpdates(bool enabled) { }
+        public void CheckForUpdates() { }
     }
     private static int checks;
     private static void Assert(bool condition, string name)
@@ -112,6 +116,25 @@ internal static class Tests
         }
         finally { monitor.SetMode(original); Console.WriteLine("HARDWARE restored=" + monitor.ReadMode()); }
     }
+    private static void Updates()
+    {
+        Assert(UpdateManager.ParseVersion("v1.2.3").ToString(3) == "1.2.3", "stable update version parsing");
+        Throws(delegate { UpdateManager.ParseVersion("v1.2.3/../other"); }, "unsafe release tag rejected");
+        string hash = new string('a', 64);
+        Assert(UpdateManager.ParseChecksum(hash.ToUpperInvariant() + "  AMZ.ScreenSize.exe\r\n") == hash, "SHA-256 manifest parsing");
+        Throws(delegate { UpdateManager.ParseChecksum(hash + "  other.exe"); }, "checksum for a different asset rejected");
+        string executable = typeof(Program).Assembly.Location;
+        string actual = UpdateManager.HashFile(executable);
+        UpdateManager.VerifyDownload(executable, actual, new Version(Program.Version));
+        Assert(actual.Length == 64, "download checksum and assembly identity verified");
+        Throws(delegate { UpdateManager.VerifyDownload(executable, new string('0', 64), new Version(Program.Version)); }, "tampered download rejected");
+        Throws(delegate { UpdateManager.VerifyDownload(executable, actual, new Version(99, 0, 0)); }, "incorrect executable version rejected");
+        Assert(!UpdateManager.CanAutoApply(true, true, false, false) && !UpdateManager.CanAutoApply(true, false, true, false) && UpdateManager.CanAutoApply(true, false, false, false), "updates deferred during game and pending restore");
+        FakeMonitor monitor = new FakeMonitor(); MemoryStore store = new MemoryStore();
+        AutomationController app = Make(monitor, store, new AppSettings()); app.SetAutoUpdate(false);
+        Assert(!store.Persisted.AutoUpdate && monitor.Writes == 0, "automatic update preference persists without monitor changes");
+        Assert(UpdateManager.QuoteArgument("C:\\Screens With Spaces\\") == "\"C:\\Screens With Spaces\\\\\"", "updater paths with spaces and trailing slash quoted correctly");
+    }
     private static void Screenshot(string path)
     {
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
@@ -139,7 +162,7 @@ internal static class Tests
         try
         {
             if (args.Length == 2 && args[0] == "--screenshot") { Screenshot(args[1]); return 0; }
-            Offline();
+            Offline(); Updates();
             if (Array.IndexOf(args, "--hardware") >= 0) Hardware();
             Console.WriteLine("PASS: " + checks + " checks"); return 0;
         }

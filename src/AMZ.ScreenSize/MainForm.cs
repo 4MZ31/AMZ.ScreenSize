@@ -15,6 +15,9 @@ namespace AMZ.ScreenSize
         void SetStartup(bool enabled);
         void OpenLog();
         void HideWindow();
+        bool AutoUpdatesEnabled { get; }
+        void SetAutoUpdates(bool enabled);
+        void CheckForUpdates();
     }
 
     public sealed class MainForm : Form
@@ -25,6 +28,9 @@ namespace AMZ.ScreenSize
         private readonly Label selected, current, status, target;
         private readonly Button apply, save, refresh;
         private readonly CheckBox automatic, startup;
+        private readonly CheckBox autoUpdates;
+        private readonly Button checkUpdates;
+        private readonly Label updateStatus;
         private bool rendering, busy;
         private AppSnapshot last;
         public bool AllowExit { get; set; }
@@ -67,6 +73,18 @@ namespace AMZ.ScreenSize
             Label subtitle = TextLabel("Samsung Odyssey G4  ·  Taille de l’image", 10, false);
             subtitle.ForeColor = Muted;
             header.Controls.Add(subtitle); header.Controls.Add(title);
+            TableLayoutPanel updates = new TableLayoutPanel { Dock = DockStyle.Right, Width = 244, RowCount = 3, ColumnCount = 1, Margin = new Padding(0) };
+            updates.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            updates.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+            updates.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            updates.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            autoUpdates = new CheckBox { Text = "Mises à jour automatiques", Dock = DockStyle.Fill, Font = new Font("Segoe UI", 8.5f), Checked = actions.AutoUpdatesEnabled };
+            autoUpdates.CheckedChanged += delegate { if (!rendering) actions.SetAutoUpdates(autoUpdates.Checked); };
+            checkUpdates = ActionButton("Vérifier les mises à jour", false); checkUpdates.Dock = DockStyle.Fill; checkUpdates.Font = new Font("Segoe UI", 8.5f);
+            checkUpdates.Click += delegate { actions.CheckForUpdates(); };
+            updateStatus = TextLabel("Version " + Program.Version, 8, false); updateStatus.ForeColor = Muted;
+            updates.Controls.Add(autoUpdates, 0, 0); updates.Controls.Add(checkUpdates, 0, 1); updates.Controls.Add(updateStatus, 0, 2);
+            header.Controls.Add(updates);
 
             TableLayoutPanel body = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(28, 20, 28, 14), ColumnCount = 2, RowCount = 1 };
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));
@@ -185,6 +203,7 @@ namespace AMZ.ScreenSize
                 automatic.Checked = snapshot.Settings.Enabled;
                 automatic.Enabled = !working;
                 startup.Checked = actions.StartupEnabled; startup.Enabled = !working;
+                autoUpdates.Checked = snapshot.Settings.AutoUpdate; autoUpdates.Enabled = !working;
                 target.Text = "Format enregistré : " + ScreenPreset.Describe(snapshot.Settings.TargetMode);
                 current.Text = "Format actuel : " + (snapshot.CurrentMode >= 0 ? ScreenPreset.Describe(snapshot.CurrentMode) : "indisponible");
                 current.ForeColor = snapshot.Connected ? Ink : Color.FromArgb(163, 79, 38);
@@ -196,6 +215,12 @@ namespace AMZ.ScreenSize
         }
         public void SelectPreset(int value)
         { if (ScreenPreset.IsSelectable(value)) presets.SelectedIndex = value; }
+        public void SetUpdateStatus(string text, bool ready, bool checking)
+        {
+            updateStatus.Text = text;
+            checkUpdates.Text = ready ? "Installer la mise à jour" : "Vérifier les mises à jour";
+            checkUpdates.Enabled = !checking;
+        }
         protected override void Dispose(bool disposing)
         {
             if (disposing) { itemFont.Dispose(); ratioFont.Dispose(); }

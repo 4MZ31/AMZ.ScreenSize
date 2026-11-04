@@ -23,6 +23,11 @@ namespace AMZ.ScreenSize
         private readonly EventWaitHandle showEvent, quitEvent;
         private readonly Icon activeIcon, inactiveIcon;
         private readonly string[] processNames;
+        private readonly UpdateManager updater;
+        private UpdatePlan pendingUpdate;
+        private bool checkingUpdates, installUpdate, manualInstallRequested;
+        private string updateMessage = "Version " + Program.Version;
+        private DateTime nextAutoCheck = DateTime.UtcNow.AddSeconds(8), nextInstallAttempt = DateTime.MinValue;
         private bool busy, quitting, allowedClose, updatingMenu, backgroundTipShown;
         private DateTime nextAttempt = DateTime.MinValue, nextRead = DateTime.MinValue;
 
@@ -31,6 +36,9 @@ namespace AMZ.ScreenSize
             this.processNames = processNames;
             store = new SettingsStore(directory);
             controller = new AutomationController(new SamsungMonitor(), store.Load(), store.Save, store.Log);
+            updater = new UpdateManager(directory, store.Log);
+            pendingUpdate = updater.ReadReady();
+            if (pendingUpdate != null) updateMessage = "Version " + pendingUpdate.Version + " prête";
             showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowName);
             quitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, QuitName);
             dispatcher = new Control(); IntPtr unused = dispatcher.Handle;
@@ -51,6 +59,7 @@ namespace AMZ.ScreenSize
                 formatsMenu.DropDownItems.Add(item);
             }
             menu.Items.Add(formatsMenu);
+            menu.Items.Add("Vérifier les mises à jour", null, delegate { CheckForUpdates(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Quitter et restaurer l’écran", null, delegate { RequestQuit(); });
             tray = new NotifyIcon { ContextMenuStrip = menu, Icon = activeIcon, Text = "AMZ.ScreenSize", Visible = true };
@@ -102,6 +111,12 @@ namespace AMZ.ScreenSize
         {
             if (showEvent.WaitOne(0)) ShowWindow();
             if (quitEvent.WaitOne(0)) { RequestQuit(); return; }
+            AppSnapshot snapshot = controller.Snapshot();
+            if (!quitting && !checkingUpdates && snapshot.Settings.AutoUpdate && DateTime.UtcNow >= nextAutoCheck && updater.CheckDue)
+                CheckForUpdates();
+            if (pendingUpdate != null && !quitting && DateTime.UtcNow >= nextInstallAttempt && (manualInstallRequested || updater.InstallRetryDue) &&
+                UpdateManager.CanAutoApply(snapshot.Settings.AutoUpdate || manualInstallRequested, GameRunning(), snapshot.Settings.RestorePending, busy))
+            { installUpdate = true; RequestQuit(); return; }
             if (busy || quitting || DateTime.UtcNow < nextAttempt) return;
             bool refresh = DateTime.UtcNow >= nextRead;
             RunOperation(delegate
@@ -127,6 +142,8 @@ namespace AMZ.ScreenSize
                         nextAttempt = DateTime.UtcNow.AddSeconds(10);
                         if (shutdown)
                         {
+                            installUpdate = false; manualInstallRequested = false;
+                            nextInstallAttempt = DateTime.UtcNow.AddMinutes(10);
                             quitting = false; timer.Start();
                             tray.ShowBalloonTip(5000, "AMZ.ScreenSize", "Restauration impossible pour le moment. L’application reste ouverte pour réessayer.", ToolTipIcon.Warning);
                         }
@@ -135,6 +152,18 @@ namespace AMZ.ScreenSize
                     Render();
                     if (shutdown && failure == null)
                     {
+                        if (installUpdate)
+                        {
+                            try { UpdateManager.BeginApply(pendingUpdate, store.DirectoryPath, !window.Visible); }
+                            catch (Exception error)
+                            {
+                                store.Log("UPDATE_LAUNCH_FAILED " + error.ToString());
+                                installUpdate = false; manualInstallRequested = false; quitting = false;
+                                nextInstallAttempt = DateTime.UtcNow.AddHours(1);
+                                updateMessage = "Installation impossible · voir Journal";
+                                timer.Start(); Render(); return;
+                            }
+                        }
                         store.Log("STOP restored=true");
                         allowedClose = true; window.AllowExit = true; tray.Visible = false; window.Close(); ExitThread(); return;
                     }
@@ -146,6 +175,7 @@ namespace AMZ.ScreenSize
         {
             AppSnapshot snapshot = controller.Snapshot();
             window.Render(snapshot, busy || quitting);
+            window.SetUpdateStatus(updateMessage, pendingUpdate != null, checkingUpdates || busy || quitting);
             updatingMenu = true;
             try
             {
@@ -164,6 +194,44 @@ namespace AMZ.ScreenSize
         public void SaveTarget(int value) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.SetTarget(value); }, false); }
         public void SetEnabled(bool enabled) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.SetEnabled(enabled); }, false); }
         public void RefreshMonitor() { nextAttempt = DateTime.MinValue; RunOperation(controller.Refresh, false); }
+        public bool AutoUpdatesEnabled { get { return controller.Snapshot().Settings.AutoUpdate; } }
+        public void SetAutoUpdates(bool enabled)
+        { RunOperation(delegate { controller.SetAutoUpdate(enabled); }, false); }
+        public void CheckForUpdates()
+        {
+            if (checkingUpdates || quitting) return;
+            if (pendingUpdate != null)
+            {
+                manualInstallRequested = true; nextInstallAttempt = DateTime.MinValue;
+                updateMessage = GameRunning() ? "Installation après la partie" : "Installation programmée…";
+                Render(); return;
+            }
+            checkingUpdates = true; updateMessage = "Recherche en cours…"; Render();
+            Task.Factory.StartNew(delegate
+            {
+                UpdatePlan plan = null; Exception failure = null;
+                try { plan = updater.Check(); }
+                catch (Exception error) { failure = error; store.Log("UPDATE_CHECK_FAILED " + error.Message); }
+                if (quitting || dispatcher.IsDisposed) return;
+                try
+                {
+                    dispatcher.BeginInvoke((Action)delegate
+                    {
+                        checkingUpdates = false; nextAutoCheck = DateTime.UtcNow.AddDays(1);
+                        if (failure != null) updateMessage = "Vérification impossible · voir Journal";
+                        else if (plan == null) updateMessage = "Aucune nouvelle version disponible";
+                        else
+                        {
+                            pendingUpdate = plan;
+                            updateMessage = "Version " + plan.Version + " prête";
+                            tray.ShowBalloonTip(4000, "AMZ.ScreenSize", "La version " + plan.Version + " est prête. L’installation automatique attend la fermeture de Counter-Strike.", ToolTipIcon.Info);
+                        }
+                        Render();
+                    });
+                }
+                catch (InvalidOperationException) { /* Application is closing. */ }
+            });
+        }
         public bool StartupEnabled { get { return StartupManager.Enabled; } }
         public void SetStartup(bool enabled)
         {

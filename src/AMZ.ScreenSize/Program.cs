@@ -39,6 +39,7 @@ namespace AMZ.ScreenSize
             string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AMZ.ScreenSize");
             try
             {
+                if (args.Length == 2 && args[0] == "--apply-update") return UpdateManager.ApplyAndRelaunch(args[1]);
                 directory = Argument(args, "--state-dir") ?? directory;
                 string diagnosticPath = Argument(args, "--diagnostic");
                 if (diagnosticPath != null)

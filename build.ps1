@@ -26,6 +26,7 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed.' }
     & $testExe
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
+    & (Join-Path $root 'tests\Test-Updater.ps1') -Executable $exe -ScratchDirectory (Join-Path $root 'TestResults')
 }
 if ($Package) {
     $dist = Join-Path $root 'dist'
