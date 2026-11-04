@@ -258,6 +258,19 @@ internal static class Tests
     }
     private static double Contrast(Color a, Color b)
     { double x = Luminance(a), y = Luminance(b); return (Math.Max(x, y) + 0.05) / (Math.Min(x, y) + 0.05); }
+    private static void PaintRegression(Control control, Color parentColor)
+    {
+        using (Panel parent = new Panel { BackColor = parentColor })
+        using (Bitmap bitmap = new Bitmap(200, 44))
+        using (Graphics graphics = Graphics.FromImage(bitmap))
+        {
+            parent.Controls.Add(control); control.Size = bitmap.Size; control.Text = "Test";
+            graphics.Clear(Color.Magenta);
+            control.GetType().GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(control, new object[] { new PaintEventArgs(graphics, control.ClientRectangle) });
+            Assert(bitmap.GetPixel(0, 0).ToArgb() == parentColor.ToArgb() && bitmap.GetPixel(199, 43).ToArgb() == parentColor.ToArgb(), control.GetType().Name + " paints corners without native black or stale buffer");
+            if (control is UiSwitch) Assert(bitmap.GetPixel(80, 20).ToArgb() == parentColor.ToArgb(), "switch repaints its entire text background");
+        }
+    }
     private static void Interface()
     {
         using (MemoryStream stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("{}")))
@@ -278,6 +291,8 @@ internal static class Tests
             UiTheme.Dark = dark;
             Assert(new[] { UiTheme.Text, UiTheme.Secondary, UiTheme.Muted }.All(c => Contrast(c, UiTheme.Surface) >= 4.5 && Contrast(c, UiTheme.Canvas) >= 4.5), "text contrast across " + (dark ? "dark" : "light") + " surfaces");
             Assert(Contrast(UiTheme.Accent, UiTheme.Selection) >= 4.5, "selection contrast in " + (dark ? "dark" : "light") + " theme");
+            PaintRegression(new UiButton(), UiTheme.Sidebar);
+            PaintRegression(new UiSwitch(), UiTheme.Surface);
         }
         UiTheme.Dark = true;
         using (Form host = new Form { ClientSize = new Size(900, 520) })
@@ -302,14 +317,65 @@ internal static class Tests
             AppSnapshot snapshot = new AppSnapshot { Settings = new AppSettings(), CurrentMode = 1, Connected = true, Status = "Ready" };
             form.Render(snapshot, false); form.Navigate(2); form.Show(); Application.DoEvents();
             Assert(Field<UiButton>(form, "dark").Selected, "default theme is visible in settings");
+            Control sidebar = form.Controls.Find("Sidebar", true).Single();
+            Assert(sidebar.Top == 0 && sidebar.Bottom == form.ClientSize.Height, "sidebar extends to the bottom independently of status bar");
+            UiSwitch startup = Field<UiSwitch>(form, "startup");
+            Assert(startup.Parent.Controls.OfType<Label>().All(label => label.Bottom <= startup.Top), "startup switch cannot overlap heading or description");
             snapshot.Settings.DarkMode = false; form.Render(snapshot, false);
             Assert(!UiTheme.Dark && form.BackColor == UiTheme.Canvas && Field<UiButton>(form, "light").Selected, "live theme change updates native window and selected choice");
             form.SelectPreset(7); Assert(Field<UiButton>(form, "apply").Enabled, "manual format application remains available when idle");
             snapshot.GameRunning = true; snapshot.Settings.RestorePending = true; form.Render(snapshot, false);
             Assert(!Field<UiButton>(form, "apply").Enabled, "manual format remains blocked during managed game");
+            ProfilesPanel panel = Field<ProfilesPanel>(form, "profiles");
+            typeof(ProfilesPanel).GetField("detection", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(panel, Task.FromResult(new List<InstalledGame>()));
+            form.Size = form.MinimumSize; form.Navigate(1); Application.DoEvents();
+            UiSwitch profileSwitch = Field<UiSwitch>(panel, "enabled"); ComboBox profileFormat = Field<ComboBox>(panel, "format");
+            Assert(profileSwitch.Top >= profileFormat.Bottom && profileSwitch.Bottom <= profileSwitch.Parent.ClientSize.Height, "profile switch stays below format and inside editor at minimum window size");
             form.AllowExit = true; form.Close();
         }
         UiTheme.Dark = true;
+    }
+    private static void InlineGames()
+    {
+        List<InstalledGame> games = new List<InstalledGame> {
+            new InstalledGame { Name = "Counter-Strike installé", Platform = "Steam", InstallDirectory = "C:\\Games\\CS", Executable = "C:\\Games\\CS\\CS2.exe" },
+            new InstalledGame { Name = "Nouveau jeu", Platform = "Steam", InstallDirectory = "C:\\Games\\New", Executable = "C:\\Games\\New\\newgame.exe" },
+            new InstalledGame { Name = "Autre jeu", Platform = "Epic", InstallDirectory = "C:\\Games\\Other", Executable = "C:\\Games\\Other\\other.exe" },
+            new InstalledGame { Name = "Jeu à identifier", Platform = "GOG", InstallDirectory = "C:\\Games\\Unknown" }
+        };
+        List<GameChoice> catalog = GameCatalog.Build(new[] { GameProfile.CounterStrike(7) }, games);
+        Assert(catalog.Count == 4 && catalog.Count(c => c.Profile != null) == 1, "catalog merges configured process aliases with installed games without duplicates");
+        Assert(catalog.Count(c => c.Matches("epic")) == 1 && catalog.Count(c => c.Matches("CS2")) == 1, "catalog search covers platform and executable aliases");
+        Assert(GameCatalog.Create(catalog, 2).Count == 2, "bulk creation skips existing profiles and unresolved executables");
+        using (Form host = new Form { ClientSize = new Size(900, 520) })
+        using (ProfilesPanel panel = new ProfilesPanel(new[] { GameProfile.CounterStrike(7) }, SystemIcons.Application, Task.FromResult(games)))
+        {
+            host.Controls.Add(panel); host.Show(); panel.PrepareDetection(); Application.DoEvents();
+            ListView list = Field<UiGameList>(panel, "list");
+            Func<string, ListViewItem> find = process => list.Items.Cast<ListViewItem>().Single(i => ((GameChoice)i.Tag).Installation != null && ((GameChoice)i.Tag).Installation.ProcessName == process);
+            find("newgame").Selected = true; Application.DoEvents();
+            ComboBox format = Field<ComboBox>(panel, "format"); format.SelectedIndex = 2;
+            UiButton save = Field<UiButton>(panel, "save");
+            Assert(save.Text == "Créer le profil" && save.Enabled && Application.OpenForms.Count == 1, "installed game selection offers creation directly in the existing page");
+            int requests = 0; panel.SaveRequested += delegate { requests++; };
+            save.PerformClick(); List<GameProfile> result = panel.ValidatedDraft();
+            Assert(requests == 1 && result.Single(p => p.Processes.Contains("newgame")).TargetMode == 2, "one inline action creates and saves selected game with its chosen format");
+            panel.Render(result, false);
+            find("other").Checked = true;
+            Assert(panel.InteractionActive, "checked games defer automatic installation while selecting");
+            Field<UiButton>(panel, "cancel").PerformClick();
+            Assert(list.Items.Cast<ListViewItem>().Where(i => ((GameChoice)i.Tag).Profile == null).All(i => !i.Checked), "cancel clears pending game selection without changing committed profiles");
+            ListViewItem configured = list.Items.Cast<ListViewItem>().Single(i => ((GameChoice)i.Tag).Profile != null && ((GameChoice)i.Tag).Profile.Processes.Contains("newgame"));
+            configured.Selected = true; Field<UiButton>(panel, "remove").PerformClick();
+            find("newgame").Selected = true; save.PerformClick(); result = panel.ValidatedDraft();
+            Assert(result.Count == 1 && result[0].Id == GameProfile.CounterStrikeId, "saving deletion cannot recreate an automatically selected installed game");
+            panel.Render(result, false);
+            find("newgame").Checked = true; find("other").Checked = true; format.SelectedIndex = 5;
+            Assert(save.Text == "Créer 2 profils", "inline bulk selection displays exact creation count");
+            save.PerformClick(); result = panel.ValidatedDraft();
+            Assert(result.Count == 3 && result.Where(p => p.Id != GameProfile.CounterStrikeId).All(p => p.TargetMode == 5), "inline bulk creation keeps common chosen format and existing profile");
+            host.Close();
+        }
     }
     private static void Screenshot(string path, string kind)
     {
@@ -320,21 +386,22 @@ internal static class Tests
             new InstalledGame { Name = "Autre jeu", Platform = "Epic Games", InstallDirectory = "C:\\Games\\Other", Executable = "C:\\Games\\Other\\other.exe" }
         });
         UiTheme.Dark = !kind.Contains("light");
-        Form selectedForm = kind == "discovery" ? (Form)new GameDiscoveryForm(new GameProfile[0], 7, SystemIcons.Application, games) : new MainForm(new PreviewActions(), SystemIcons.Application);
+        Form selectedForm = new MainForm(new PreviewActions(), SystemIcons.Application);
         using (Form form = selectedForm)
         {
             MainForm main = form as MainForm;
             if (main != null)
             {
                 main.Render(new AppSnapshot { Settings = new AppSettings { Profiles = examples, DarkMode = UiTheme.Dark }, CurrentMode = 1, Connected = true, Status = "Prêt · en attente d’un jeu" }, false);
-                if (kind == "profiles")
+                if (kind.StartsWith("profiles") || kind == "discovery")
                 {
                     ProfilesPanel panel = Field<ProfilesPanel>(main, "profiles");
                     typeof(ProfilesPanel).GetField("detection", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(panel, games);
                     main.Navigate(1);
+                    if (kind == "discovery") Field<UiGameList>(panel, "list").Items.Cast<ListViewItem>().First(i => ((GameChoice)i.Tag).Profile == null).Selected = true;
                 }
                 if (kind.Contains("settings")) main.Navigate(2);
-                if (kind == "minimum") main.Size = main.MinimumSize;
+                if (kind.Contains("minimum")) main.Size = main.MinimumSize;
             }
             form.Show(); Application.DoEvents();
             for (int frame = 0; frame < 20; frame++) { System.Threading.Thread.Sleep(10); Application.DoEvents(); }
@@ -364,13 +431,15 @@ internal static class Tests
             if (args.Length == 2 && args[0] == "--light-screenshot") { Screenshot(args[1], "light"); return 0; }
             if (args.Length == 2 && args[0] == "--settings-light-screenshot") { Screenshot(args[1], "settings-light"); return 0; }
             if (args.Length == 2 && args[0] == "--minimum-screenshot") { Screenshot(args[1], "minimum"); return 0; }
+            if (args.Length == 2 && args[0] == "--profiles-minimum-screenshot") { Screenshot(args[1], "profiles-minimum"); return 0; }
+            if (args.Length == 2 && args[0] == "--settings-minimum-screenshot") { Screenshot(args[1], "settings-minimum"); return 0; }
             if (args.Length == 1 && args[0] == "--discover")
             {
                 List<InstalledGame> games = GameDiscovery.Discover(GameDiscovery.SystemOptions());
                 foreach (InstalledGame game in games) Console.WriteLine(game.Platform + " | " + game.Name + " | " + game.ProcessName);
                 Console.WriteLine("DETECTED " + games.Count + " games; " + games.Count(game => !string.IsNullOrEmpty(game.ProcessName)) + " executables"); return 0;
             }
-            Offline(); Updates(); Profiles(); DiscoverGames(); Interface();
+            Offline(); Updates(); Profiles(); DiscoverGames(); Interface(); InlineGames();
             if (Array.IndexOf(args, "--hardware") >= 0) Hardware();
             Console.WriteLine("PASS: " + checks + " checks"); return 0;
         }

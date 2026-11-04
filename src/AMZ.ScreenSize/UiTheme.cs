@@ -65,7 +65,6 @@ namespace AMZ.ScreenSize
             string role = root.Tag as string;
             root.BackColor = role == "sidebar" ? Sidebar : role == "surface" || role == "input" || root is TextBox || root is ComboBox || root is ListBox || root is ListView ? Surface : root.Parent == null ? Canvas : root.Parent.BackColor;
             root.ForeColor = role == "muted" ? Muted : role == "secondary" ? Secondary : role == "danger" ? Danger : Text;
-            if (root is Label || root is UiSwitch) root.BackColor = Color.Transparent;
             Form form = root as Form;
             if (form != null && form.IsHandleCreated) Caption(form.Handle);
             foreach (Control child in root.Controls) Apply(child);
@@ -75,6 +74,12 @@ namespace AMZ.ScreenSize
         {
             try { int dark = Dark ? 1 : 0; DwmSetWindowAttribute(handle, 20, ref dark, 4); }
             catch (DllNotFoundException) { } catch (EntryPointNotFoundException) { }
+        }
+        public static void PaintBackground(Control control, Graphics graphics)
+        {
+            Color color = control.Parent == null ? Canvas : control.Parent.BackColor;
+            if (color.A != 255) color = Canvas;
+            using (Brush brush = new SolidBrush(color)) graphics.FillRectangle(brush, control.ClientRectangle);
         }
         [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
         public static GraphicsPath Rounded(RectangleF rect, float radius)
@@ -111,7 +116,13 @@ namespace AMZ.ScreenSize
         public bool Primary, Selected, Quiet, Destructive;
         public string Symbol;
         private bool hover, pressed;
-        public UiButton() { FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0; Font = UiTheme.Medium(); SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true); }
+        public UiButton()
+        {
+            FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0; UseVisualStyleBackColor = false; Font = UiTheme.Medium();
+            SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw | ControlStyles.Opaque, true);
+            SetStyle(ControlStyles.SupportsTransparentBackColor, false);
+        }
+        protected override void OnPaintBackground(PaintEventArgs e) { UiTheme.PaintBackground(this, e.Graphics); }
         protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
         protected override void OnMouseLeave(EventArgs e) { hover = pressed = false; Invalidate(); base.OnMouseLeave(e); }
         protected override void OnMouseDown(MouseEventArgs e) { pressed = true; Invalidate(); base.OnMouseDown(e); }
@@ -120,6 +131,7 @@ namespace AMZ.ScreenSize
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
         protected override void OnPaint(PaintEventArgs e)
         {
+            UiTheme.PaintBackground(this, e.Graphics);
             float scale = e.Graphics.DpiX / 96f;
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             Color background = Selected ? UiTheme.Selection : Primary && Enabled ? UiTheme.Text : hover && Enabled ? UiTheme.Raised : Quiet ? BackColor : UiTheme.Surface;
@@ -143,10 +155,19 @@ namespace AMZ.ScreenSize
     }
     public sealed class UiSwitch : CheckBox
     {
-        public UiSwitch() { Height = 40; Font = UiTheme.Body(); Cursor = Cursors.Hand; AutoSize = false; SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true); }
+        public UiSwitch()
+        {
+            Height = 40; Font = UiTheme.Body(); Cursor = Cursors.Hand; AutoSize = false; UseVisualStyleBackColor = false;
+            SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw | ControlStyles.Opaque, true);
+            SetStyle(ControlStyles.SupportsTransparentBackColor, false);
+        }
+        protected override void OnPaintBackground(PaintEventArgs e) { UiTheme.PaintBackground(this, e.Graphics); }
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
         protected override void OnCheckedChanged(EventArgs e) { Invalidate(); base.OnCheckedChanged(e); }
         protected override void OnPaint(PaintEventArgs e)
         {
+            UiTheme.PaintBackground(this, e.Graphics);
             float s = e.Graphics.DpiX / 96; e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             RectangleF track = new RectangleF(Width - 44 * s, (Height - 24 * s) / 2, 40 * s, 24 * s);
             using (GraphicsPath path = UiTheme.Rounded(track, 12 * s)) using (Brush brush = new SolidBrush(Checked && Enabled ? UiTheme.Accent : UiTheme.Border)) e.Graphics.FillPath(brush, path);

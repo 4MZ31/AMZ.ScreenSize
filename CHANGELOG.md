@@ -1,5 +1,14 @@
 # Historique des versions
 
+## 2.0.1 — 2026-11-04
+
+- Suppression des fonds noirs et des fragments de contrôles derrière les boutons et interrupteurs : peinture opaque complète, indépendante de la transparence native.
+- Navigation latérale prolongée jusqu’au bas de la fenêtre, y compris à côté de la barre d’état.
+- Correction des superpositions dans les profils, au démarrage et dans les mises à jour.
+- Catalogue de jeux et profils intégré : recherche, sélection, création à l’unité ou par groupe et édition dans la même page, sans fenêtre métier supplémentaire.
+- Préservation des choix pendant la recherche et protection des brouillons lors des rafraîchissements et mises à jour.
+- 114 assertions hors matériel, dont 19 nouvelles vérifications de peinture, géométrie, catalogue et création intégrée.
+
 ## 2.0.0 — 2026-11-04
 
 - Refonte complète de l’interface : navigation Écran / Profils de jeux / Réglages, hiérarchie et parcours réorganisés.

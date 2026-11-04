@@ -44,7 +44,7 @@ Un seul système local de traits, dans un cadre de 18 px : moniteur, profils, r�
 
 ### 4. Textes
 
-Les actions deviennent **Appliquer**, **Attribuer à un jeu**, **Détecter les jeux**, **Enregistrer** et **Annuler**. Les indications expliquent la différence entre zone d’affichage et résolution Windows. Le compteur de sélection de jeux apparaît dans le bouton d’ajout. Les erreurs de profil restent dans l’éditeur, près des actions.
+Les actions deviennent **Appliquer**, **Attribuer à un jeu**, **Créer le profil**, **Enregistrer** et **Annuler**. Les indications expliquent la différence entre zone d’affichage et résolution Windows. Le compteur de sélection de jeux apparaît dans le bouton de création. Les erreurs de profil restent dans l’éditeur, près des actions.
 
 ### 5. Typographie
 
@@ -52,13 +52,13 @@ Segoe UI pour conserver une présence Windows native ; titres de 24 points, corp
 
 ### 6. Organisation
 
-Trois destinations persistantes : **Écran** pour choisir et appliquer, **Profils de jeux** pour gérer l’automatisme et les jeux, **Réglages** pour l’apparence, le démarrage, les mises à jour et le diagnostic. L’éditeur des profils est intégré dans la page, avec une liste à gauche. La détection reste un dialogue consacré à la sélection de plusieurs jeux.
+Trois destinations persistantes : **Écran** pour choisir et appliquer, **Profils de jeux** pour gérer l’automatisme et les jeux, **Réglages** pour l’apparence, le démarrage, les mises à jour et le diagnostic. Depuis 2.0.1, profils et jeux installés partagent une liste recherchable à gauche. Sélection, création, ajout groupé et édition restent dans cette page, sans dialogue métier supplémentaire.
 
 ### 7. Détails et interactions
 
 Boutons avec survol, pression, focus clavier, sélection et état désactivé. Interrupteurs basés sur les contrôles Windows accessibles ; champs et listes restent natifs. Bordures, flèches, menus de notification et titre de fenêtre suivent le thème. Les informations de réussite apparaissent huit secondes dans la barre d’état, sans déplacer le contenu ; un message long reste accessible par infobulle.
 
-Les brouillons survivent à la navigation et aux rafraîchissements. Une sauvegarde échouée ne les efface pas. Une installation automatique attend leur enregistrement ou annulation et la fermeture du dialogue de détection. Quitter explicitement avec un brouillon propose de le conserver en annulant la fermeture. La surveillance périodique reste silencieuse et les commandes utilisateur reçues pendant une opération sont mises en file.
+Les brouillons survivent à la navigation et aux rafraîchissements. Une sauvegarde échouée ne les efface pas. Une installation automatique attend la fin de l’édition et de la sélection de jeux. Quitter explicitement avec un brouillon propose de le conserver en annulant la fermeture. La surveillance périodique reste silencieuse et les commandes utilisateur reçues pendant une opération sont mises en file.
 
 ### 8. Visuel du produit
 
@@ -71,10 +71,16 @@ Retours natifs immédiats au survol, au clic, à la sélection et à la validati
 ## Vérifications
 
 - Compilation avec le compilateur .NET Framework de Windows, sans NuGet.
-- 95 assertions hors matériel : 91 tests de logique et interface, quatre tests du remplacement réel d’un EXE.
+- 114 assertions hors matériel : 110 tests de logique et interface, quatre tests du remplacement réel d’un EXE.
 - Migration vers le sombre, persistance du clair, contrastes des deux thèmes, conservation/annulation des brouillons et validation des profils.
 - Rendus Windows natifs : écran, profils, détection, réglages, thème clair et fenêtre réduite à sa taille minimale. Trois séries de corrections visuelles au maximum par écran ; les captures publiques utilisent des données fictives.
 - Cycle sur le G4 réel : jeu Alpha en 17″, priorité sur Beta, passage à Beta en 21,5″, puis restauration du format initial Wide. Le mode initial a été relu après fermeture.
 - L’automatisation interactive Computer Use a été bloquée par une erreur d’identité de fenêtre du pilote, persistante après actualisation. Aucun parcours cliqué n’est présenté comme validé par ce pilote ; les tests d’interface utilisent les contrôles WinForms réels.
 
 Les menus et boîtes système de sélection de fichiers restent gérés par Windows. La prise en charge DPI existante est conservée ; cette livraison ne prétend pas certifier toutes les combinaisons de moniteurs et de facteurs d’échelle.
+
+## Correctif 2.0.1 : rafraîchissement réel et sélection intégrée
+
+Les captures reçues après la version 2.0 montraient des fonds noirs et des fragments d’anciens contrôles, absents des rendus statiques initiaux. Les boutons et interrupteurs dessinent désormais explicitement tout leur fond opaque à chaque peinture, y compris en dehors de leurs coins arrondis. Leur fond ne dépend plus de la simulation de transparence WinForms. Les tests de régression commencent avec un tampon coloré et vérifient que le contrôle le recouvre entièrement aux emplacements attendus, dans les deux thèmes.
+
+La barre d’état appartient maintenant à l’espace de contenu ; elle ne raccourcit plus la navigation. La position du titre et de l’interrupteur de démarrage est contrôlée par un test de géométrie. L’espace Profils utilise le catalogue intégré décrit ci-dessus ; les tests couvrent la fusion des installations déjà configurées, la recherche, les choix groupés, leur annulation et le cas où l’enregistrement d’une suppression ne doit pas recréer le jeu sélectionné.

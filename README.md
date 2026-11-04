@@ -56,11 +56,11 @@ Les préférences de la version 1.0 sont reprises automatiquement dans un profil
 
 ### Détecter les jeux installés
 
-La recherche démarre automatiquement à l’ouverture de la page des profils. Le bouton **Détecter les jeux**, puis **Jeux installés (n)**, ouvre la liste ; **Actualiser** relance la détection.
+La recherche démarre automatiquement à l’ouverture de la page des profils. Les jeux installés et les profils existants sont réunis dans la liste de gauche, avec une recherche par nom, plateforme ou exécutable. **Actualiser** relance la détection. Aucune fenêtre de sélection supplémentaire ne s’ouvre.
 
 ![Détection et sélection des jeux installés, données d’exemple](docs/discovery.png)
 
-Cocher les jeux souhaités, choisir le format initial de leurs profils, puis cliquer sur **Ajouter n profils**. Le compteur confirme la sélection, même pendant une recherche. Chaque format pourra ensuite être ajusté séparément. Les jeux déjà associés à un profil sont signalés pour éviter les doublons. Aucun profil n’est créé ou activé sans cette sélection et l’enregistrement des profils.
+Sélectionner un jeu sans profil, choisir son format à droite et cliquer sur **Créer le profil**. Pour plusieurs jeux, cocher leurs lignes, choisir un format commun puis cliquer sur **Créer n profils**. Les coches sont conservées pendant une recherche. Les profils existants sont signalés par une coche simple et restent modifiables directement dans la même page. Aucun profil n’est créé par une simple sélection.
 
 La détection lit les sources locales suivantes, sans connexion aux comptes des lanceurs et sans parcours complet des disques :
 
@@ -100,7 +100,7 @@ L’option **Télécharger et installer automatiquement** est activée par défa
 
 Lorsqu’une version plus récente existe, l’application télécharge l’EXE et son fichier `SHA256SUMS.txt` en HTTPS depuis les releases de `4MZ31/AMZ.ScreenSize`. Elle vérifie l’empreinte SHA-256, le nom de l’assembly et sa version avant toute installation. Les préversions, les versions anciennes et les fichiers dont la vérification échoue sont refusés.
 
-L’installation automatique attend que les jeux des profils soient fermés, que le format d’origine ait été restauré et qu’aucun brouillon de profils ou dialogue de détection ne soit ouvert. Un assistant local remplace alors l’EXE et relance l’application, avec les mêmes préférences et le même état de fenêtre. Si les mises à jour automatiques sont désactivées, une mise à jour téléchargée peut être installée avec **Installer la mise à jour**.
+L’installation automatique attend que les jeux des profils soient fermés, que le format d’origine ait été restauré et que l’édition ou la sélection de profils soit terminée. Un assistant local remplace alors l’EXE et relance l’application, avec les mêmes préférences et le même état de fenêtre. Si les mises à jour automatiques sont désactivées, une mise à jour téléchargée peut être installée avec **Installer la mise à jour**.
 
 L’ancien EXE est conservé à côté du nouveau sous le nom `AMZ.ScreenSize.exe.previous`. Un remplacement qui échoue conserve l’exécutable en place et n’est pas retenté automatiquement pendant une heure, pour éviter une boucle de redémarrages. Le journal indique le résultat. Le dossier de l’exécutable doit être accessible en écriture sans élévation ; un dossier utilisateur convient.
 
@@ -149,7 +149,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test -Packa
 - Tests : `bin\Release\AMZ.ScreenSize.Tests.exe`.
 - Fichiers distribuables : `dist\`.
 
-Les **95 assertions hors matériel** comprennent 91 vérifications de logique, persistance, profils, détection, interface et validation des mises à jour, ainsi que quatre tests isolés du remplacement réel d’un EXE, de sa sauvegarde, de son redémarrage et du rejet d’un fichier invalide. Elles couvrent aussi les deux thèmes, les contrastes de texte, la migration du thème, la conservation des brouillons, les erreurs de validation et l’acquittement des sauvegardes. Les workflows GitHub exécutent ces tests sans écran physique et sans modifier une installation utilisateur.
+Les **114 assertions hors matériel** comprennent 110 vérifications de logique, persistance, profils, détection, interface et validation des mises à jour, ainsi que quatre tests isolés du remplacement réel d’un EXE, de sa sauvegarde, de son redémarrage et du rejet d’un fichier invalide. Elles couvrent aussi les deux thèmes, les contrastes, la peinture complète des boutons et interrupteurs, la hauteur de navigation, l’absence de chevauchement au démarrage et dans les profils à taille minimale, les brouillons et la création intégrée de profils, à l’unité ou en groupe. Les workflows GitHub exécutent ces tests sans écran physique et sans modifier une installation utilisateur.
 
 Pour lancer volontairement le test matériel sur un G4 compatible, hors partie :
 

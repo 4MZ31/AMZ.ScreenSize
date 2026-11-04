@@ -41,15 +41,15 @@ namespace AMZ.ScreenSize
         private readonly Timer feedbackTimer = new Timer { Interval = 8000 };
         private readonly ToolTip hints = new ToolTip { AutoPopDelay = 10000 };
         public bool AllowExit { get; set; }
-        public bool HasUnsavedProfiles { get { return profiles.Dirty; } }
-        public bool EditingProfiles { get { return profiles.Dirty || profiles.DiscoveryOpen; } }
+        public bool HasUnsavedProfiles { get { return profiles.Dirty || profiles.PendingSelection; } }
+        public bool EditingProfiles { get { return profiles.InteractionActive; } }
 
         public MainForm(IAppActions actions, Icon icon)
         {
             this.actions = actions;
             Text = "AMZ.ScreenSize"; Icon = icon; Font = UiTheme.Body(); AutoScaleMode = AutoScaleMode.Dpi;
             ClientSize = new Size(1160, 760); MinimumSize = new Size(1080, 736); StartPosition = FormStartPosition.CenterScreen;
-            Panel sidebar = new Panel { Dock = DockStyle.Left, Width = 232, Padding = new Padding(16, 28, 16, 20), Tag = "sidebar" };
+            Panel sidebar = new Panel { Name = "Sidebar", Dock = DockStyle.Left, Width = 232, Padding = new Padding(16, 28, 16, 20), Tag = "sidebar" };
             Label brand = UiTheme.Label("AMZ.ScreenSize", 16); brand.Font = UiTheme.Medium(16); brand.Dock = DockStyle.Top; brand.Height = 40;
             Label tagline = UiTheme.Label("Votre écran, à votre mesure.", 9.5f, "muted"); tagline.Dock = DockStyle.Top; tagline.Height = 32;
             Panel nav = new Panel { Dock = DockStyle.Top, Height = 156, Tag = "sidebar" };
@@ -130,12 +130,14 @@ namespace AMZ.ScreenSize
             refresh = UiTheme.Button("Actualiser le moniteur"); refresh.Width = 204; refresh.Margin = new Padding(0, 0, 12, 0); refresh.Click += delegate { actions.RefreshMonitor(); };
             UiButton log = UiTheme.Button("Ouvrir le journal"); log.Width = 172; log.Click += delegate { actions.OpenLog(); }; tools.Controls.Add(refresh); tools.Controls.Add(log); support.Controls.Add(tools); settings.Controls.Add(support, 0, 4);
             pages = new Control[] { screen, profilePage, settings }; foreach (Control page in pages) { page.Dock = DockStyle.Fill; content.Controls.Add(page); }
-            Panel bottom = new Panel { Dock = DockStyle.Bottom, Height = 40, Padding = new Padding(264, 0, 32, 0) };
+            Panel bottom = new Panel { Dock = DockStyle.Bottom, Height = 40, Padding = new Padding(32, 0, 32, 0) };
             status = UiTheme.Label("Connexion au moniteur…", 9.5f, "muted"); bottom.Controls.Add(status);
             feedback = UiTheme.Label("", 9.5f); feedback.Visible = false; bottom.Controls.Add(feedback); feedback.BringToFront();
             feedbackTimer.Tick += delegate { feedback.Visible = false; feedbackTimer.Stop(); };
             hints.SetToolTip(assign, "Enregistrer le format sélectionné pour un profil de jeu.");
-            Controls.Add(content); Controls.Add(sidebar); Controls.Add(bottom);
+            Panel workspace = new Panel { Dock = DockStyle.Fill };
+            workspace.Controls.Add(content); workspace.Controls.Add(bottom);
+            Controls.Add(workspace); Controls.Add(sidebar);
             presets.SelectedIndex = 7; Navigate(0); UiTheme.Apply(this);
             HandleCreated += delegate { UiTheme.Caption(Handle); };
             FormClosing += delegate(object sender, FormClosingEventArgs e) { if (!AllowExit && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; actions.HideWindow(); } };
@@ -183,7 +185,7 @@ namespace AMZ.ScreenSize
             apply.Enabled = !busy && presets.SelectedIndex >= 0 && last != null && last.Connected && !last.Settings.RestorePending && !(last.GameRunning && last.Settings.Enabled);
             apply.Text = last != null && last.CurrentMode == presets.SelectedIndex ? "Appliqué" : "Appliquer";
             if (last != null && last.CurrentMode == presets.SelectedIndex) apply.Enabled = false;
-            assign.Enabled = !busy && !profiles.Dirty && presets.SelectedIndex >= 0;
+            assign.Enabled = !busy && !HasUnsavedProfiles && presets.SelectedIndex >= 0;
             hints.SetToolTip(apply, last != null && (last.Settings.RestorePending || (last.GameRunning && last.Settings.Enabled)) ? "Un profil gère l’écran. Mettez les profils en pause pour appliquer un format manuel." : "Appliquer le format sélectionné au moniteur.");
         }
         public void Render(AppSnapshot snapshot, bool working)
