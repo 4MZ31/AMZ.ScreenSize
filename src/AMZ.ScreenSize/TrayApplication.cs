@@ -1,0 +1,207 @@
+using System;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace AMZ.ScreenSize
+{
+    public sealed class TrayApplication : ApplicationContext, IAppActions
+    {
+        public const string MutexName = "Local\\AMZ.ScreenSize-v1";
+        public const string ShowName = "Local\\AMZ.ScreenSize-v1-Show";
+        public const string QuitName = "Local\\AMZ.ScreenSize-v1-Quit";
+        private readonly SettingsStore store;
+        private readonly AutomationController controller;
+        private readonly MainForm window;
+        private readonly Control dispatcher;
+        private readonly NotifyIcon tray;
+        private readonly ToolStripMenuItem enabledMenu, statusMenu, formatsMenu;
+        private readonly System.Windows.Forms.Timer timer;
+        private readonly EventWaitHandle showEvent, quitEvent;
+        private readonly Icon activeIcon, inactiveIcon;
+        private readonly string[] processNames;
+        private bool busy, quitting, allowedClose, updatingMenu, backgroundTipShown;
+        private DateTime nextAttempt = DateTime.MinValue, nextRead = DateTime.MinValue;
+
+        public TrayApplication(string directory, bool background, string[] processNames)
+        {
+            this.processNames = processNames;
+            store = new SettingsStore(directory);
+            controller = new AutomationController(new SamsungMonitor(), store.Load(), store.Save, store.Log);
+            showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowName);
+            quitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, QuitName);
+            dispatcher = new Control(); IntPtr unused = dispatcher.Handle;
+            activeIcon = MakeIcon(true); inactiveIcon = MakeIcon(false);
+            ContextMenuStrip menu = new ContextMenuStrip();
+            menu.Items.Add("Ouvrir AMZ.ScreenSize", null, delegate { ShowWindow(); });
+            statusMenu = new ToolStripMenuItem("Connexion…") { Enabled = false }; menu.Items.Add(statusMenu);
+            menu.Items.Add(new ToolStripSeparator());
+            enabledMenu = new ToolStripMenuItem("Activer pour Counter-Strike") { CheckOnClick = true };
+            enabledMenu.CheckedChanged += delegate { if (!updatingMenu) SetEnabled(enabledMenu.Checked); };
+            menu.Items.Add(enabledMenu);
+            formatsMenu = new ToolStripMenuItem("Format pour Counter-Strike");
+            foreach (ScreenPreset preset in ScreenPreset.All)
+            {
+                int value = preset.Value;
+                ToolStripMenuItem item = new ToolStripMenuItem(preset.Label) { Tag = value };
+                item.Click += delegate { SaveTarget(value); };
+                formatsMenu.DropDownItems.Add(item);
+            }
+            menu.Items.Add(formatsMenu);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Quitter et restaurer l’écran", null, delegate { RequestQuit(); });
+            tray = new NotifyIcon { ContextMenuStrip = menu, Icon = activeIcon, Text = "AMZ.ScreenSize", Visible = true };
+            tray.DoubleClick += delegate { ShowWindow(); };
+            window = new MainForm(this, activeIcon);
+            window.SelectPreset(controller.Snapshot().Settings.SelectedMode);
+            window.FormClosing += delegate(object sender, FormClosingEventArgs args)
+            { if (allowedClose) args.Cancel = false; };
+            timer = new System.Windows.Forms.Timer { Interval = 2000 };
+            timer.Tick += TimerTick;
+            timer.Start();
+            Render();
+            store.Log("START version=" + Program.Version + " processes=" + string.Join(",", processNames));
+            if (!background) ShowWindow();
+            RunOperation(delegate { controller.Tick(GameRunning()); controller.Refresh(); }, false);
+        }
+
+        private static Icon MakeIcon(bool active)
+        {
+            using (Bitmap bitmap = new Bitmap(32, 32))
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            using (Brush ink = new SolidBrush(Color.FromArgb(29, 43, 53)))
+            using (Brush accent = new SolidBrush(active ? Color.FromArgb(67, 175, 148) : Color.FromArgb(130, 137, 145)))
+            {
+                graphics.Clear(Color.Transparent);
+                graphics.FillRectangle(ink, 1, 4, 30, 23);
+                graphics.FillRectangle(accent, 5, 8, 22, 15);
+                graphics.FillRectangle(ink, 14, 27, 4, 3);
+                graphics.FillRectangle(ink, 9, 30, 14, 2);
+                IntPtr handle = bitmap.GetHicon();
+                try { return (Icon)Icon.FromHandle(handle).Clone(); }
+                finally { DestroyIcon(handle); }
+            }
+        }
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool DestroyIcon(IntPtr icon);
+
+        private bool GameRunning()
+        {
+            bool running = false;
+            foreach (string name in processNames)
+            {
+                Process[] processes = Process.GetProcessesByName(name);
+                foreach (Process process in processes) { running = true; process.Dispose(); }
+            }
+            return running;
+        }
+        private void TimerTick(object sender, EventArgs args)
+        {
+            if (showEvent.WaitOne(0)) ShowWindow();
+            if (quitEvent.WaitOne(0)) { RequestQuit(); return; }
+            if (busy || quitting || DateTime.UtcNow < nextAttempt) return;
+            bool refresh = DateTime.UtcNow >= nextRead;
+            RunOperation(delegate
+            {
+                controller.Tick(GameRunning());
+                if (refresh) { controller.Refresh(); nextRead = DateTime.UtcNow.AddSeconds(15); }
+            }, false);
+        }
+        private void RunOperation(Action operation, bool shutdown)
+        {
+            if (busy) return;
+            busy = true; Render();
+            Task.Factory.StartNew(delegate
+            {
+                Exception failure = null;
+                try { operation(); }
+                catch (Exception error) { failure = error; controller.RecordError(error); }
+                dispatcher.BeginInvoke((Action)delegate
+                {
+                    busy = false;
+                    if (failure != null)
+                    {
+                        nextAttempt = DateTime.UtcNow.AddSeconds(10);
+                        if (shutdown)
+                        {
+                            quitting = false; timer.Start();
+                            tray.ShowBalloonTip(5000, "AMZ.ScreenSize", "Restauration impossible pour le moment. L’application reste ouverte pour réessayer.", ToolTipIcon.Warning);
+                        }
+                    }
+                    else nextAttempt = DateTime.MinValue;
+                    Render();
+                    if (shutdown && failure == null)
+                    {
+                        store.Log("STOP restored=true");
+                        allowedClose = true; window.AllowExit = true; tray.Visible = false; window.Close(); ExitThread(); return;
+                    }
+                    if (quitting && !shutdown) QueueShutdown();
+                });
+            });
+        }
+        private void Render()
+        {
+            AppSnapshot snapshot = controller.Snapshot();
+            window.Render(snapshot, busy || quitting);
+            updatingMenu = true;
+            try
+            {
+                enabledMenu.Checked = snapshot.Settings.Enabled;
+                enabledMenu.Enabled = !busy && !quitting;
+                formatsMenu.Enabled = !busy && !quitting;
+                foreach (ToolStripMenuItem item in formatsMenu.DropDownItems)
+                    item.Checked = (int)item.Tag == snapshot.Settings.TargetMode;
+                tray.Icon = snapshot.Settings.Enabled ? activeIcon : inactiveIcon;
+                tray.Text = "AMZ.ScreenSize · " + (snapshot.Settings.Enabled ? "CS : " + ScreenPreset.Describe(snapshot.Settings.TargetMode) : "automatisme désactivé");
+                statusMenu.Text = snapshot.CurrentMode >= 0 ? "Écran : " + ScreenPreset.Describe(snapshot.CurrentMode) : "Écran indisponible";
+            }
+            finally { updatingMenu = false; }
+        }
+        public void ApplyManual(int value) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.ApplyManual(value); }, false); }
+        public void SaveTarget(int value) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.SetTarget(value); }, false); }
+        public void SetEnabled(bool enabled) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.SetEnabled(enabled); }, false); }
+        public void RefreshMonitor() { nextAttempt = DateTime.MinValue; RunOperation(controller.Refresh, false); }
+        public bool StartupEnabled { get { return StartupManager.Enabled; } }
+        public void SetStartup(bool enabled)
+        {
+            try { StartupManager.SetEnabled(enabled, Application.ExecutablePath); store.Log("STARTUP enabled=" + enabled); }
+            catch (Exception error) { MessageBox.Show(window, error.Message, "Lancement avec Windows", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            Render();
+        }
+        public void OpenLog()
+        {
+            if (!File.Exists(store.LogPath)) store.Log("Journal ouvert");
+            Process.Start(new ProcessStartInfo("notepad.exe", "\"" + store.LogPath + "\"") { UseShellExecute = true });
+        }
+        private void ShowWindow()
+        { window.Show(); window.WindowState = FormWindowState.Normal; window.Activate(); }
+        public void HideWindow()
+        {
+            window.Hide();
+            if (!backgroundTipShown)
+            {
+                backgroundTipShown = true;
+                tray.ShowBalloonTip(3000, "AMZ.ScreenSize", "L’application reste active dans les icônes masquées. Double-cliquez sur son icône pour rouvrir l’interface.", ToolTipIcon.Info);
+            }
+        }
+        private void RequestQuit()
+        {
+            if (quitting) return;
+            quitting = true; timer.Stop(); Render();
+            if (!busy) QueueShutdown();
+        }
+        private void QueueShutdown() { RunOperation(controller.Close, true); }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                timer.Dispose(); tray.Dispose(); window.Dispose(); dispatcher.Dispose();
+                showEvent.Dispose(); quitEvent.Dispose(); activeIcon.Dispose(); inactiveIcon.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+    }
+}
