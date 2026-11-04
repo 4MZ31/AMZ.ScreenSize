@@ -1,5 +1,17 @@
 # Historique des versions
 
+## 2.0.0 — 2026-11-04
+
+- Refonte complète de l’interface : navigation Écran / Profils de jeux / Réglages, hiérarchie et parcours réorganisés.
+- Thème sombre par défaut, clair disponible dans les réglages et préférence persistante, y compris après migration.
+- Aperçu proportionnel du moniteur, identité graphite, angles de cadrage et typographie Windows cohérente.
+- Profils édités dans la page, brouillons conservés, validation intégrée, sauvegarde et annulation explicites.
+- Détection avec recherche et compteur d’ajout ; commandes, menus et états interactifs communs.
+- Vérifications périodiques silencieuses ; file des commandes pour éviter de perdre un clic pendant une opération.
+- Installation des mises à jour différée pendant l’édition d’un brouillon ou la sélection de jeux.
+- Fonctions existantes et préférences conservées ; 95 assertions hors matériel et cycle réel à deux jeux avec restauration vérifiée.
+- Méthodologie Unslop de Damir Sokolovsky (@heydamir), CC BY 4.0 ; audit et attribution dans `docs/ux-redesign.md`.
+
 ## 1.1.0 — 2026-11-04
 
 ### Nouveautés

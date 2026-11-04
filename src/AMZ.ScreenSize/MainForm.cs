@@ -1,8 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Windows.Forms;
 using System.Linq;
+using System.Windows.Forms;
 
 namespace AMZ.ScreenSize
 {
@@ -10,6 +11,7 @@ namespace AMZ.ScreenSize
     {
         void ApplyManual(int value);
         void SaveProfileTarget(string id, int value);
+        void SaveProfiles(List<GameProfile> profiles);
         void EditProfiles();
         void SetEnabled(bool enabled);
         void RefreshMonitor();
@@ -20,243 +22,200 @@ namespace AMZ.ScreenSize
         bool AutoUpdatesEnabled { get; }
         void SetAutoUpdates(bool enabled);
         void CheckForUpdates();
+        void SetDarkMode(bool dark);
     }
 
     public sealed class MainForm : Form
     {
         private readonly IAppActions actions;
+        private readonly Control[] pages;
+        private readonly UiButton[] navigation;
         private readonly ListBox presets;
         private readonly ScreenPreview preview;
-        private readonly Label selected, current, status, target;
-        private readonly Button apply, save, refresh;
-        private readonly CheckBox automatic, startup;
-        private readonly CheckBox autoUpdates;
-        private readonly Button checkUpdates;
-        private readonly Label updateStatus;
-        private readonly ComboBox profileCombo;
-        private readonly Button manageProfiles;
-        private string profilesSignature;
-        private bool rendering, busy;
+        private readonly Label selected, current, status, deviceStatus, activity, updateStatus, feedback;
+        private readonly UiButton apply, assign, checkUpdates, dark, light, refresh;
+        private readonly UiSwitch automatic, startup, autoUpdates;
+        private readonly ProfilesPanel profiles;
         private AppSnapshot last;
+        private bool rendering, busy;
+        private readonly Timer feedbackTimer = new Timer { Interval = 8000 };
+        private readonly ToolTip hints = new ToolTip { AutoPopDelay = 10000 };
         public bool AllowExit { get; set; }
-        private readonly Font itemFont = new Font("Segoe UI", 11, FontStyle.Regular);
-        private readonly Font ratioFont = new Font("Segoe UI", 9, FontStyle.Regular);
-        private static readonly Color Ink = Color.FromArgb(29, 43, 53);
-        private static readonly Color Muted = Color.FromArgb(96, 109, 120);
-
-        private static Label TextLabel(string text, float size, bool bold)
-        {
-            return new Label { Text = text, AutoSize = false, Dock = DockStyle.Fill,
-                Font = new Font("Segoe UI", size, bold ? FontStyle.Bold : FontStyle.Regular),
-                ForeColor = Ink, TextAlign = ContentAlignment.MiddleLeft };
-        }
-        private static Button ActionButton(string text, bool primary)
-        {
-            Button button = new Button { Text = text, AutoSize = false, Width = 190, Height = 38,
-                FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand, Margin = new Padding(0, 0, 10, 0),
-                BackColor = primary ? Ink : Color.White, ForeColor = primary ? Color.White : Ink };
-            button.FlatAppearance.BorderColor = primary ? Ink : Color.FromArgb(210, 217, 222);
-            if (primary) button.EnabledChanged += delegate { button.BackColor = button.Enabled ? Ink : Color.FromArgb(217, 223, 227); };
-            return button;
-        }
+        public bool HasUnsavedProfiles { get { return profiles.Dirty; } }
+        public bool EditingProfiles { get { return profiles.Dirty || profiles.DiscoveryOpen; } }
 
         public MainForm(IAppActions actions, Icon icon)
         {
             this.actions = actions;
-            Text = "AMZ.ScreenSize"; Icon = icon;
-            Font = new Font("Segoe UI", 10);
-            BackColor = Color.FromArgb(245, 247, 249);
-            ForeColor = Ink;
-            AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(1000, 750);
-            MinimumSize = new Size(960, 780);
-            StartPosition = FormStartPosition.CenterScreen;
+            Text = "AMZ.ScreenSize"; Icon = icon; Font = UiTheme.Body(); AutoScaleMode = AutoScaleMode.Dpi;
+            ClientSize = new Size(1160, 760); MinimumSize = new Size(1080, 736); StartPosition = FormStartPosition.CenterScreen;
+            Panel sidebar = new Panel { Dock = DockStyle.Left, Width = 232, Padding = new Padding(16, 28, 16, 20), Tag = "sidebar" };
+            Label brand = UiTheme.Label("AMZ.ScreenSize", 16); brand.Font = UiTheme.Medium(16); brand.Dock = DockStyle.Top; brand.Height = 40;
+            Label tagline = UiTheme.Label("Votre écran, à votre mesure.", 9.5f, "muted"); tagline.Dock = DockStyle.Top; tagline.Height = 32;
+            Panel nav = new Panel { Dock = DockStyle.Top, Height = 156, Tag = "sidebar" };
+            navigation = new UiButton[3];
+            string[] titles = { "Écran", "Profils de jeux", "Réglages" }, symbols = { "screen", "profiles", "settings" };
+            for (int i = 0; i < 3; i++)
+            {
+                int page = i; UiButton button = UiTheme.Button(titles[i]); button.Quiet = true; button.Symbol = symbols[i];
+                button.SetBounds(0, 28 + i * 40, 200, 36); button.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                button.Click += delegate { Navigate(page); }; navigation[i] = button; nav.Controls.Add(button);
+            }
+            Panel device = new Panel { Dock = DockStyle.Bottom, Height = 124, Tag = "sidebar" };
+            Label model = UiTheme.Label("Samsung Odyssey G4"); model.Dock = DockStyle.Top; model.Height = 28;
+            deviceStatus = UiTheme.Label("Connexion en cours", 9.5f, "muted"); deviceStatus.Dock = DockStyle.Top; deviceStatus.Height = 24;
+            Label version = UiTheme.Label("AMZ.ScreenSize  /  " + Program.Version, 9.5f, "muted"); version.Dock = DockStyle.Bottom; version.Height = 32;
+            device.Controls.Add(deviceStatus); device.Controls.Add(model); device.Controls.Add(version);
+            sidebar.Controls.Add(nav); sidebar.Controls.Add(tagline); sidebar.Controls.Add(brand); sidebar.Controls.Add(device);
+            Panel content = new Panel { Dock = DockStyle.Fill, Padding = new Padding(32, 28, 32, 24) };
 
-            Panel header = new Panel { Dock = DockStyle.Top, Height = 96, Padding = new Padding(28, 12, 28, 10), BackColor = Color.White };
-            Label title = TextLabel("AMZ.ScreenSize", 22, true);
-            title.Dock = DockStyle.Top; title.Height = 40;
-            Label subtitle = TextLabel("Samsung Odyssey G4  ·  Taille de l’image", 10, false);
-            subtitle.ForeColor = Muted;
-            header.Controls.Add(subtitle); header.Controls.Add(title);
-            TableLayoutPanel updates = new TableLayoutPanel { Dock = DockStyle.Right, Width = 244, RowCount = 3, ColumnCount = 1, Margin = new Padding(0) };
-            updates.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            updates.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
-            updates.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-            updates.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            autoUpdates = new CheckBox { Text = "Mises à jour automatiques", Dock = DockStyle.Fill, Font = new Font("Segoe UI", 8.5f), Checked = actions.AutoUpdatesEnabled };
-            autoUpdates.CheckedChanged += delegate { if (!rendering) actions.SetAutoUpdates(autoUpdates.Checked); };
-            checkUpdates = ActionButton("Vérifier les mises à jour", false); checkUpdates.Dock = DockStyle.Fill; checkUpdates.Font = new Font("Segoe UI", 8.5f);
-            checkUpdates.Click += delegate { actions.CheckForUpdates(); };
-            updateStatus = TextLabel("Version " + Program.Version, 8, false); updateStatus.ForeColor = Muted;
-            updates.Controls.Add(autoUpdates, 0, 0); updates.Controls.Add(checkUpdates, 0, 1); updates.Controls.Add(updateStatus, 0, 2);
-            header.Controls.Add(updates);
-
-            TableLayoutPanel body = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(28, 20, 28, 14), ColumnCount = 2, RowCount = 1 };
-            body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));
-            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            body.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            TableLayoutPanel left = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, Margin = new Padding(0, 0, 24, 0) };
-            left.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-            left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
-            left.Controls.Add(TextLabel("Formats prédéfinis", 12, true), 0, 0);
-            presets = new ListBox { Dock = DockStyle.Fill, DrawMode = DrawMode.OwnerDrawFixed,
-                ItemHeight = 44, BorderStyle = BorderStyle.None, IntegralHeight = false,
-                BackColor = Color.White, Margin = new Padding(0, 8, 0, 8), AccessibleName = "Formats prédéfinis" };
+            TableLayoutPanel screen = UiTheme.Table(1, 48, 36, 28, 0, 72, 64);
+            screen.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            screen.Controls.Add(UiTheme.Label("Format de l’écran", 24), 0, 0);
+            screen.Controls.Add(UiTheme.Label("Ajustez la zone d’affichage de votre moniteur.", 10.5f, "secondary"), 0, 1);
+            TableLayoutPanel chooser = UiTheme.Table(2, 0); chooser.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 252)); chooser.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            presets = new ListBox { Dock = DockStyle.Fill, DrawMode = DrawMode.OwnerDrawFixed, ItemHeight = 44, BorderStyle = BorderStyle.None,
+                IntegralHeight = false, Margin = new Padding(0, 0, 24, 0), AccessibleName = "Formats de l’écran" };
             foreach (ScreenPreset preset in ScreenPreset.All) presets.Items.Add(preset);
             presets.DrawItem += DrawPreset;
-            presets.SelectedIndexChanged += delegate { if (presets.SelectedIndex >= 0) UpdateSelection(); };
-            left.Controls.Add(presets, 0, 1);
-            Label note = TextLabel("Ces formats changent la zone d’affichage du moniteur. La résolution Windows reste identique.", 9, false);
-            note.ForeColor = Muted; note.TextAlign = ContentAlignment.TopLeft; note.Padding = new Padding(0, 10, 0, 0);
-            left.Controls.Add(note, 0, 2);
+            presets.SelectedIndexChanged += delegate { if (presets.SelectedIndex >= 0) { preview.Preset = ScreenPreset.All[presets.SelectedIndex]; selected.Text = preview.Preset.Label; UpdateButtons(); } };
+            Panel previewArea = new Panel { Dock = DockStyle.Fill, Padding = new Padding(20, 12, 20, 12), Tag = "surface", Margin = new Padding(0) };
+            Label previewLabel = UiTheme.Label("Zone d’affichage", 10.5f, "secondary"); previewLabel.Dock = DockStyle.Top; previewLabel.Height = 32;
+            selected = UiTheme.Label("23″ Wide (16:9)", 17); selected.Dock = DockStyle.Bottom; selected.Height = 40; selected.TextAlign = ContentAlignment.MiddleCenter;
+            Label caption = UiTheme.Label("Aperçu indicatif sur une dalle de 27″", 9.5f, "muted"); caption.Dock = DockStyle.Bottom; caption.Height = 28; caption.TextAlign = ContentAlignment.MiddleCenter;
+            preview = new ScreenPreview { Dock = DockStyle.Fill, Tag = "surface" };
+            previewArea.Controls.Add(preview); previewArea.Controls.Add(previewLabel); previewArea.Controls.Add(selected); previewArea.Controls.Add(caption);
+            chooser.Controls.Add(presets, 0, 0); chooser.Controls.Add(previewArea, 1, 0); screen.Controls.Add(chooser, 0, 3);
+            TableLayoutPanel commands = UiTheme.Table(2, 0); commands.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); commands.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 308)); commands.Padding = new Padding(0, 16, 0, 12);
+            Label note = UiTheme.Label("La résolution Windows reste identique.", 9.5f, "muted");
+            FlowLayoutPanel buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
+            assign = UiTheme.Button("Attribuer à un jeu"); assign.Width = 172; assign.Margin = new Padding(0, 0, 12, 0); assign.Click += AssignPreset;
+            apply = UiTheme.Button("Appliquer", true); apply.Width = 124; apply.Click += delegate { actions.ApplyManual(presets.SelectedIndex); };
+            buttons.Controls.Add(assign); buttons.Controls.Add(apply); commands.Controls.Add(note, 0, 0); commands.Controls.Add(buttons, 1, 0); screen.Controls.Add(commands, 0, 4);
+            Panel readout = new Panel { Dock = DockStyle.Fill, Tag = "surface", Padding = new Padding(16, 8, 16, 8), Margin = new Padding(0) };
+            current = UiTheme.Label("Format actuel : connexion…"); current.Dock = DockStyle.Top; current.Height = 24;
+            activity = UiTheme.Label("Les profils appliquent leur format au lancement d’un jeu.", 9.5f, "muted"); activity.Dock = DockStyle.Fill;
+            readout.Controls.Add(activity); readout.Controls.Add(current); screen.Controls.Add(readout, 0, 5);
 
-            TableLayoutPanel right = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = new Padding(0) };
-            right.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
-            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
-            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 194));
-            preview = new ScreenPreview { Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0), BackColor = Color.White };
-            right.Controls.Add(preview, 0, 0);
-            selected = TextLabel("23\u2033 Wide (16:9)", 13, true);
-            right.Controls.Add(selected, 0, 1);
-            FlowLayoutPanel buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = new Padding(0), WrapContents = false };
-            apply = ActionButton("Appliquer maintenant", true);
-            save = ActionButton("Utiliser pour le profil", false);
-            apply.Click += delegate { actions.ApplyManual(presets.SelectedIndex); };
-            save.Click += delegate { GameProfile profile = profileCombo.SelectedItem as GameProfile; if (profile != null) actions.SaveProfileTarget(profile.Id, presets.SelectedIndex); };
-            buttons.Controls.Add(apply); buttons.Controls.Add(save); right.Controls.Add(buttons, 0, 2);
+            TableLayoutPanel profilePage = UiTheme.Table(1, 48, 40, 56, 0); profilePage.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            profilePage.Controls.Add(UiTheme.Label("Profils de jeux", 24), 0, 0);
+            profilePage.Controls.Add(UiTheme.Label("Un format par jeu. Le précédent revient à la fermeture du dernier jeu.", 10.5f, "secondary"), 0, 1);
+            automatic = new UiSwitch { Text = "Changer automatiquement le format", Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 16), AccessibleName = "Activer les profils automatiques" };
+            automatic.CheckedChanged += delegate { if (!rendering) actions.SetEnabled(automatic.Checked); }; profilePage.Controls.Add(automatic, 0, 2);
+            profiles = new ProfilesPanel(new GameProfile[0], icon, null);
+            profiles.SaveRequested += delegate { actions.SaveProfiles(profiles.ValidatedDraft()); };
+            profilePage.Controls.Add(profiles, 0, 3);
 
-            TableLayoutPanel automation = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16, 8, 16, 8), BackColor = Color.White,
-                RowCount = 5, ColumnCount = 1, Margin = new Padding(0, 4, 0, 0) };
-            automation.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            automation.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            automation.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            automation.RowStyles.Add(new RowStyle(SizeType.Absolute, 33));
-            automation.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-            automation.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            Panel profileHeader = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0) };
-            manageProfiles = ActionButton("Gérer / détecter…", false); manageProfiles.Dock = DockStyle.Right; manageProfiles.Width = 154; manageProfiles.Font = new Font("Segoe UI", 9);
-            manageProfiles.Click += delegate { actions.EditProfiles(); };
-            profileHeader.Controls.Add(TextLabel("Profils de jeux", 11, true)); profileHeader.Controls.Add(manageProfiles);
-            automation.Controls.Add(profileHeader, 0, 0);
-            automatic = new CheckBox { Text = "Activer les profils automatiques", Dock = DockStyle.Fill, AutoSize = false, Cursor = Cursors.Hand };
-            automatic.CheckedChanged += delegate { if (!rendering) actions.SetEnabled(automatic.Checked); };
-            automation.Controls.Add(automatic, 0, 1);
-            profileCombo = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Profil de jeu" };
-            profileCombo.SelectedIndexChanged += delegate { if (!rendering) UpdateButtons(); };
-            automation.Controls.Add(profileCombo, 0, 2);
-            target = TextLabel("Priorité au premier jeu détecté", 9, false); target.ForeColor = Muted;
-            automation.Controls.Add(target, 0, 3);
-            Label restore = TextLabel("Le format d’origine revient après le dernier jeu géré.", 9, false);
-            restore.ForeColor = Muted;
-            automation.Controls.Add(restore, 0, 4);
-            right.Controls.Add(automation, 0, 3);
-            body.Controls.Add(left, 0, 0); body.Controls.Add(right, 1, 0);
-
-            TableLayoutPanel footer = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 88, BackColor = Color.White,
-                Padding = new Padding(28, 8, 28, 8), ColumnCount = 3, RowCount = 2 };
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 108));
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 86));
-            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            footer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            current = TextLabel("Format actuel : connexion…", 10, true); footer.Controls.Add(current, 0, 0);
-            refresh = ActionButton("Actualiser", false); refresh.Dock = DockStyle.Fill; refresh.Height = 30;
-            refresh.Click += delegate { actions.RefreshMonitor(); }; footer.Controls.Add(refresh, 1, 0);
-            Button log = ActionButton("Journal", false); log.Dock = DockStyle.Fill; log.Height = 30;
-            log.Click += delegate { actions.OpenLog(); }; footer.Controls.Add(log, 2, 0);
-            status = TextLabel("Connexion au moniteur…", 8.5f, false); status.ForeColor = Muted; footer.Controls.Add(status, 0, 1);
-            startup = new CheckBox { Text = "Lancer avec Windows", Dock = DockStyle.Fill, AutoSize = false, Font = new Font("Segoe UI", 8.5f), Checked = actions.StartupEnabled };
-            startup.CheckedChanged += delegate { if (!rendering) actions.SetStartup(startup.Checked); };
-            footer.Controls.Add(startup, 1, 1); footer.SetColumnSpan(startup, 2);
-            Controls.Add(body); Controls.Add(footer); Controls.Add(header);
-            presets.SelectedIndex = 7;
-            FormClosing += delegate(object sender, FormClosingEventArgs args)
-            {
-                if (!AllowExit && args.CloseReason == CloseReason.UserClosing) { args.Cancel = true; actions.HideWindow(); }
-            };
+            TableLayoutPanel settings = UiTheme.Table(1, 48, 40, 160, 184, 140, 0); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            settings.Controls.Add(UiTheme.Label("Réglages", 24), 0, 0);
+            settings.Controls.Add(UiTheme.Label("Un utilitaire discret, configuré pour votre quotidien.", 10.5f, "secondary"), 0, 1);
+            Panel appearance = SettingSection("Apparence", "Choisissez le thème de l’application.");
+            FlowLayoutPanel themes = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, WrapContents = false, Margin = new Padding(0) };
+            dark = UiTheme.Button("Sombre"); dark.Width = 128; dark.Margin = new Padding(0, 0, 12, 0); dark.Click += delegate { actions.SetDarkMode(true); };
+            light = UiTheme.Button("Clair"); light.Width = 128; light.Click += delegate { actions.SetDarkMode(false); }; themes.Controls.Add(dark); themes.Controls.Add(light); appearance.Controls.Add(themes);
+            TableLayoutPanel preferences = UiTheme.Table(2, 0); preferences.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); preferences.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            appearance.Margin = new Padding(0, 0, 12, 12); preferences.Controls.Add(appearance, 0, 0);
+            Panel launch = SettingSection("Au démarrage", "Reste actif dans les icônes masquées.");
+            startup = new UiSwitch { Text = "Lancer avec Windows", Dock = DockStyle.Bottom, Height = 40, Checked = actions.StartupEnabled };
+            startup.CheckedChanged += delegate { if (!rendering) actions.SetStartup(startup.Checked); }; launch.Controls.Add(startup); preferences.Controls.Add(launch, 1, 0); settings.Controls.Add(preferences, 0, 2);
+            Panel updates = SettingSection("Mises à jour", "Les nouvelles versions s’installent après la fermeture des jeux gérés.");
+            autoUpdates = new UiSwitch { Text = "Télécharger et installer automatiquement", Dock = DockStyle.Bottom, Height = 40, Checked = actions.AutoUpdatesEnabled };
+            autoUpdates.CheckedChanged += delegate { if (!rendering) actions.SetAutoUpdates(autoUpdates.Checked); };
+            Panel updateRow = new Panel { Dock = DockStyle.Bottom, Height = 48 };
+            checkUpdates = UiTheme.Button("Vérifier les mises à jour"); checkUpdates.Width = 228; checkUpdates.Dock = DockStyle.Right; checkUpdates.Click += delegate { actions.CheckForUpdates(); };
+            updateStatus = UiTheme.Label("Version " + Program.Version, 9.5f, "muted"); updateStatus.Dock = DockStyle.Fill;
+            updateRow.Controls.Add(updateStatus); updateRow.Controls.Add(checkUpdates); updates.Controls.Add(autoUpdates); updates.Controls.Add(updateRow); settings.Controls.Add(updates, 0, 3);
+            Panel support = SettingSection("Moniteur et diagnostic", "Relisez le format actuel ou consultez le journal d’activité.");
+            FlowLayoutPanel tools = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, WrapContents = false };
+            refresh = UiTheme.Button("Actualiser le moniteur"); refresh.Width = 204; refresh.Margin = new Padding(0, 0, 12, 0); refresh.Click += delegate { actions.RefreshMonitor(); };
+            UiButton log = UiTheme.Button("Ouvrir le journal"); log.Width = 172; log.Click += delegate { actions.OpenLog(); }; tools.Controls.Add(refresh); tools.Controls.Add(log); support.Controls.Add(tools); settings.Controls.Add(support, 0, 4);
+            pages = new Control[] { screen, profilePage, settings }; foreach (Control page in pages) { page.Dock = DockStyle.Fill; content.Controls.Add(page); }
+            Panel bottom = new Panel { Dock = DockStyle.Bottom, Height = 40, Padding = new Padding(264, 0, 32, 0) };
+            status = UiTheme.Label("Connexion au moniteur…", 9.5f, "muted"); bottom.Controls.Add(status);
+            feedback = UiTheme.Label("", 9.5f); feedback.Visible = false; bottom.Controls.Add(feedback); feedback.BringToFront();
+            feedbackTimer.Tick += delegate { feedback.Visible = false; feedbackTimer.Stop(); };
+            hints.SetToolTip(assign, "Enregistrer le format sélectionné pour un profil de jeu.");
+            Controls.Add(content); Controls.Add(sidebar); Controls.Add(bottom);
+            presets.SelectedIndex = 7; Navigate(0); UiTheme.Apply(this);
+            HandleCreated += delegate { UiTheme.Caption(Handle); };
+            FormClosing += delegate(object sender, FormClosingEventArgs e) { if (!AllowExit && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; actions.HideWindow(); } };
             Resize += delegate { if (WindowState == FormWindowState.Minimized) actions.HideWindow(); };
         }
-
-        private void DrawPreset(object sender, DrawItemEventArgs args)
+        private static Panel SettingSection(string title, string description)
         {
-            if (args.Index < 0) return;
-            ScreenPreset preset = ScreenPreset.All[args.Index];
-            bool chosen = (args.State & DrawItemState.Selected) != 0;
-            Color background = chosen ? Ink : Color.White;
-            Color foreground = chosen ? Color.White : Ink;
-            using (Brush brush = new SolidBrush(background)) args.Graphics.FillRectangle(brush, args.Bounds);
-            Rectangle name = new Rectangle(args.Bounds.X + 14, args.Bounds.Y, args.Bounds.Width - 100, args.Bounds.Height);
-            Rectangle ratio = new Rectangle(args.Bounds.Right - 102, args.Bounds.Y, 88, args.Bounds.Height);
-            TextRenderer.DrawText(args.Graphics, preset.Name, itemFont, name, foreground, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-            TextRenderer.DrawText(args.Graphics, preset.Value < 2 ? (preset.Value == 0 ? "Source" : "Plein écran") : preset.Ratio,
-                ratioFont, ratio, chosen ? Color.FromArgb(188, 217, 222) : Muted, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
-            if ((args.State & DrawItemState.Focus) != 0) args.DrawFocusRectangle();
+            Panel panel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(20, 12, 20, 12), Margin = new Padding(0, 0, 0, 12), Tag = "surface" };
+            Label heading = UiTheme.Label(title, 11.5f); heading.Font = UiTheme.Medium(11.5f); heading.Dock = DockStyle.Top; heading.Height = 24;
+            Label detail = UiTheme.Label(description, 9.5f, "secondary"); detail.Dock = DockStyle.Top; detail.Height = 28;
+            panel.Controls.Add(detail); panel.Controls.Add(heading); return panel;
         }
-        private void UpdateSelection()
+        public void Navigate(int index)
         {
-            ScreenPreset preset = ScreenPreset.All[presets.SelectedIndex];
-            preview.Preset = preset; selected.Text = preset.Label;
-            UpdateButtons();
+            if (index < 0 || index >= pages.Length) return;
+            for (int i = 0; i < pages.Length; i++) { pages[i].Visible = i == index; navigation[i].Selected = i == index; navigation[i].Invalidate(); }
+            pages[index].BringToFront(); feedback.BringToFront();
+            if (index == 1) profiles.PrepareDetection();
+        }
+        private void DrawPreset(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0) return;
+            ScreenPreset preset = ScreenPreset.All[e.Index]; bool chosen = (e.State & DrawItemState.Selected) != 0;
+            using (Brush brush = new SolidBrush(chosen ? UiTheme.Selection : UiTheme.Surface)) e.Graphics.FillRectangle(brush, e.Bounds);
+            float s = e.Graphics.DpiX / 96;
+            UiIcon.Draw(e.Graphics, "crop", new RectangleF(e.Bounds.X + 12 * s, e.Bounds.Y + (e.Bounds.Height - 18 * s) / 2, 18 * s, 18 * s), chosen ? UiTheme.Accent : UiTheme.Muted);
+            TextRenderer.DrawText(e.Graphics, preset.Name, Font, new Rectangle(e.Bounds.X + (int)(42 * s), e.Bounds.Y, e.Bounds.Width - (int)(104 * s), e.Bounds.Height), chosen ? UiTheme.Accent : UiTheme.Text, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            using (Font mono = new Font("Consolas", 9.5f)) TextRenderer.DrawText(e.Graphics, preset.Value < 2 ? "" : preset.Ratio, mono,
+                new Rectangle(e.Bounds.Right - (int)(62 * s), e.Bounds.Y, (int)(50 * s), e.Bounds.Height), UiTheme.Secondary, TextFormatFlags.VerticalCenter | TextFormatFlags.Right);
+            if ((e.State & DrawItemState.Focus) != 0) e.DrawFocusRectangle();
+        }
+        private void AssignPreset(object sender, EventArgs e)
+        {
+            if (last == null || last.Settings.Profiles.Count == 0) { Navigate(1); return; }
+            ContextMenuStrip menu = new ContextMenuStrip { Renderer = new UiMenuRenderer(), Font = UiTheme.Body() };
+            foreach (GameProfile profile in last.Settings.Profiles)
+            {
+                string id = profile.Id;
+                menu.Items.Add(profile.Name, null, delegate { actions.SaveProfileTarget(id, presets.SelectedIndex); });
+            }
+            menu.Closed += delegate { BeginInvoke((Action)delegate { menu.Dispose(); }); }; menu.Show(assign, new Point(0, assign.Height));
         }
         private void UpdateButtons()
         {
-            bool hasSelection = presets.SelectedIndex >= 0;
-            apply.Enabled = !busy && hasSelection && (last == null || (!last.Settings.RestorePending && !(last.GameRunning && last.Settings.Enabled)));
-            GameProfile profile = profileCombo == null ? null : profileCombo.SelectedItem as GameProfile;
-            save.Enabled = !busy && hasSelection && profile != null && presets.SelectedIndex != profile.TargetMode;
+            apply.Enabled = !busy && presets.SelectedIndex >= 0 && last != null && last.Connected && !last.Settings.RestorePending && !(last.GameRunning && last.Settings.Enabled);
+            apply.Text = last != null && last.CurrentMode == presets.SelectedIndex ? "Appliqué" : "Appliquer";
+            if (last != null && last.CurrentMode == presets.SelectedIndex) apply.Enabled = false;
+            assign.Enabled = !busy && !profiles.Dirty && presets.SelectedIndex >= 0;
+            hints.SetToolTip(apply, last != null && (last.Settings.RestorePending || (last.GameRunning && last.Settings.Enabled)) ? "Un profil gère l’écran. Mettez les profils en pause pour appliquer un format manuel." : "Appliquer le format sélectionné au moniteur.");
         }
         public void Render(AppSnapshot snapshot, bool working)
         {
             last = snapshot; busy = working; rendering = true;
             try
             {
-                if (snapshot.Settings.Profiles == null) snapshot.Settings.Validate();
-                string signature = string.Join("|", snapshot.Settings.Profiles.Select(profile => profile.Id + ":" + profile.Name + ":" + profile.TargetMode + ":" + profile.Enabled));
-                if (signature != profilesSignature)
-                {
-                    GameProfile previous = profileCombo.SelectedItem as GameProfile;
-                    string selectedId = previous == null ? null : previous.Id;
-                    profileCombo.BeginUpdate();
-                    try
-                    {
-                        profileCombo.Items.Clear();
-                        foreach (GameProfile profile in snapshot.Settings.Profiles) profileCombo.Items.Add(profile.Copy());
-                        int index = snapshot.Settings.Profiles.FindIndex(profile => profile.Id == selectedId);
-                        profileCombo.SelectedIndex = index >= 0 ? index : profileCombo.Items.Count > 0 ? 0 : -1;
-                    }
-                    finally { profileCombo.EndUpdate(); }
-                    profilesSignature = signature;
-                }
-                profileCombo.Enabled = !working && profileCombo.Items.Count > 0; manageProfiles.Enabled = !working;
-                automatic.Checked = snapshot.Settings.Enabled;
-                automatic.Enabled = !working;
+                snapshot.Settings.Validate();
+                if (UiTheme.Dark != snapshot.Settings.DarkMode) { UiTheme.Dark = snapshot.Settings.DarkMode; UiTheme.Apply(this); }
+                dark.Selected = snapshot.Settings.DarkMode; light.Selected = !snapshot.Settings.DarkMode; dark.Invalidate(); light.Invalidate();
+                automatic.Checked = snapshot.Settings.Enabled; automatic.Enabled = !working;
                 startup.Checked = actions.StartupEnabled; startup.Enabled = !working;
                 autoUpdates.Checked = snapshot.Settings.AutoUpdate; autoUpdates.Enabled = !working;
-                target.Text = snapshot.ActiveProfileName == null ? "Priorité au premier jeu détecté" : "Jeu détecté : " + snapshot.ActiveProfileName;
-                current.Text = "Format actuel : " + (snapshot.CurrentMode >= 0 ? ScreenPreset.Describe(snapshot.CurrentMode) : "indisponible");
-                current.ForeColor = snapshot.Connected ? Ink : Color.FromArgb(163, 79, 38);
-                status.Text = working ? "Changement en cours…" : snapshot.Status;
-                refresh.Enabled = !working;
-                UpdateButtons();
+                dark.Enabled = light.Enabled = refresh.Enabled = !working;
+                current.Text = "Format actuel  ·  " + (snapshot.CurrentMode >= 0 ? ScreenPreset.Describe(snapshot.CurrentMode) : "indisponible");
+                activity.Text = snapshot.ActiveProfileName != null ? "Profil actif : " + snapshot.ActiveProfileName + " · restauration à la fermeture" : snapshot.Settings.Enabled ? "Profils automatiques actifs · en attente d’un jeu" : "Profils automatiques en pause · le format reste manuel";
+                deviceStatus.Text = snapshot.Connected ? "Connecté · 27″ / DDC-CI" : "Moniteur indisponible";
+                deviceStatus.ForeColor = snapshot.Connected ? UiTheme.Accent : UiTheme.Muted;
+                status.Text = working ? "Opération en cours…" : snapshot.Status;
+                profiles.Render(snapshot.Settings.Profiles, working); UpdateButtons();
             }
             finally { rendering = false; }
         }
-        public void SelectPreset(int value)
-        { if (ScreenPreset.IsSelectable(value)) presets.SelectedIndex = value; }
+        public void SelectPreset(int value) { if (ScreenPreset.IsSelectable(value)) presets.SelectedIndex = value; }
+        public void ShowFeedback(string text, bool error)
+        { feedback.Text = text; hints.SetToolTip(feedback, text); feedback.ForeColor = error ? UiTheme.Danger : UiTheme.Accent; feedback.Visible = true; feedback.BringToFront(); feedbackTimer.Stop(); feedbackTimer.Start(); }
+        protected override void Dispose(bool disposing)
+        { if (disposing) { feedbackTimer.Dispose(); hints.Dispose(); } base.Dispose(disposing); }
         public void SetUpdateStatus(string text, bool ready, bool checking)
         {
             updateStatus.Text = text;
-            checkUpdates.Text = ready ? "Installer la mise à jour" : "Vérifier les mises à jour";
-            checkUpdates.Enabled = !checking;
-        }
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) { itemFont.Dispose(); ratioFont.Dispose(); }
-            base.Dispose(disposing);
+            checkUpdates.Text = ready ? "Installer la mise à jour" : "Vérifier les mises à jour"; checkUpdates.Enabled = !checking;
         }
     }
 
@@ -264,43 +223,30 @@ namespace AMZ.ScreenSize
     {
         private ScreenPreset preset = ScreenPreset.All[7];
         public ScreenPreset Preset { get { return preset; } set { preset = value; Invalidate(); } }
-        public ScreenPreview() { DoubleBuffered = true; ResizeRedraw = true; }
-        protected override void OnPaint(PaintEventArgs args)
+        public ScreenPreview() { DoubleBuffered = true; ResizeRedraw = true; AccessibleName = "Aperçu de la zone d’affichage"; }
+        protected override void OnPaint(PaintEventArgs e)
         {
-            base.OnPaint(args);
-            Graphics graphics = args.Graphics; graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            float width = Math.Max(40, Math.Min(ClientSize.Width - 54, (ClientSize.Height - 58) * 16f / 9f));
-            float height = width * 9f / 16f;
-            RectangleF frame = new RectangleF((ClientSize.Width - width) / 2, Math.Max(12, (ClientSize.Height - height - 34) / 2), width, height);
-            using (Brush border = new SolidBrush(Color.FromArgb(29, 43, 53))) graphics.FillRectangle(border, frame);
-            RectangleF screen = RectangleF.Inflate(frame, -7, -7);
-            graphics.FillRectangle(Brushes.Black, screen);
-            double nativeWidth = 27 * 16 / Math.Sqrt(337), nativeHeight = 27 * 9 / Math.Sqrt(337);
-            double physicalHeight = preset.Inches / Math.Sqrt(preset.Aspect * preset.Aspect + 1);
-            double physicalWidth = physicalHeight * preset.Aspect;
-            float activeWidth = screen.Width * (float)(physicalWidth / nativeWidth);
-            float activeHeight = screen.Height * (float)(physicalHeight / nativeHeight);
-            RectangleF active = new RectangleF(screen.X + (screen.Width - activeWidth) / 2, screen.Y + (screen.Height - activeHeight) / 2, activeWidth, activeHeight);
-            using (Brush fill = new SolidBrush(Color.FromArgb(46, 107, 120))) graphics.FillRectangle(fill, active);
-            using (Pen grid = new Pen(Color.FromArgb(62, 128, 140), 1))
+            base.OnPaint(e); Graphics g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; float s = g.DpiX / 96;
+            float w = Math.Max(40, Math.Min(Width - 24 * s, (Height - 64 * s) * 16 / 9f)), h = w * 9 / 16;
+            RectangleF frame = new RectangleF((Width - w) / 2, Math.Max(8 * s, (Height - h - 24 * s) / 2), w, h);
+            using (GraphicsPath path = UiTheme.Rounded(frame, 8 * s)) using (Brush b = new SolidBrush(UiTheme.Border)) g.FillPath(b, path);
+            RectangleF screen = RectangleF.Inflate(frame, -5 * s, -5 * s); using (Brush b = new SolidBrush(UiTheme.Hex(0x090B0C))) g.FillRectangle(b, screen);
+            double nativeW = 27 * 16 / Math.Sqrt(337), nativeH = 27 * 9 / Math.Sqrt(337);
+            double ph = preset.Inches / Math.Sqrt(preset.Aspect * preset.Aspect + 1), pw = ph * preset.Aspect;
+            float aw = screen.Width * (float)(pw / nativeW), ah = screen.Height * (float)(ph / nativeH);
+            RectangleF active = new RectangleF(screen.X + (screen.Width - aw) / 2, screen.Y + (screen.Height - ah) / 2, aw, ah);
+            using (Brush b = new SolidBrush(UiTheme.Hex(0x1D3931))) g.FillRectangle(b, active);
+            using (Pen p = new Pen(UiTheme.Hex(0x73C8B1), 1.5f * s))
             {
-                for (int i = 1; i < 4; i++)
-                {
-                    graphics.DrawLine(grid, active.X + active.Width * i / 4, active.Top, active.X + active.Width * i / 4, active.Bottom);
-                    graphics.DrawLine(grid, active.Left, active.Y + active.Height * i / 4, active.Right, active.Y + active.Height * i / 4);
-                }
+                float c = 12 * s; RectangleF r = RectangleF.Inflate(active, -6 * s, -6 * s);
+                g.DrawLines(p, new[] { new PointF(r.Left, r.Top + c), new PointF(r.Left, r.Top), new PointF(r.Left + c, r.Top) });
+                g.DrawLines(p, new[] { new PointF(r.Right - c, r.Top), new PointF(r.Right, r.Top), new PointF(r.Right, r.Top + c) });
+                g.DrawLines(p, new[] { new PointF(r.Left, r.Bottom - c), new PointF(r.Left, r.Bottom), new PointF(r.Left + c, r.Bottom) });
+                g.DrawLines(p, new[] { new PointF(r.Right - c, r.Bottom), new PointF(r.Right, r.Bottom), new PointF(r.Right, r.Bottom - c) });
             }
-            using (Font font = new Font("Segoe UI", 16, FontStyle.Bold))
-            using (StringFormat format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-                graphics.DrawString(preset.Value < 2 ? preset.Name : preset.Name.Replace(" Wide", "") + "\n" + preset.Ratio, font, Brushes.White, active, format);
-            using (Pen stand = new Pen(Color.FromArgb(29, 43, 53), 5))
-            {
-                graphics.DrawLine(stand, frame.X + frame.Width / 2, frame.Bottom, frame.X + frame.Width / 2, frame.Bottom + 10);
-                graphics.DrawLine(stand, frame.X + frame.Width / 2 - 24, frame.Bottom + 11, frame.X + frame.Width / 2 + 24, frame.Bottom + 11);
-            }
-            using (Font font = new Font("Segoe UI", 8.5f))
-                TextRenderer.DrawText(graphics, "Aperçu indicatif · Le rendu dépend du signal vidéo", font,
-                    new Rectangle(0, ClientSize.Height - 22, ClientSize.Width, 20), Color.FromArgb(96, 109, 120), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            using (Font f = UiTheme.Body(26)) using (Brush b = new SolidBrush(UiTheme.Hex(0xD8EDE6))) using (StringFormat align = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                g.DrawString(preset.Value < 2 ? preset.Name : preset.Name.Replace(" Wide", ""), f, b, active, align);
+            using (Pen stand = new Pen(UiTheme.Border, 4 * s)) { g.DrawLine(stand, frame.X + w / 2, frame.Bottom + 2 * s, frame.X + w / 2, frame.Bottom + 20 * s); g.DrawLine(stand, frame.X + w / 2 - 28 * s, frame.Bottom + 20 * s, frame.X + w / 2 + 28 * s, frame.Bottom + 20 * s); }
         }
     }
 }

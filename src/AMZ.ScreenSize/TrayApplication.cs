@@ -26,7 +26,8 @@ namespace AMZ.ScreenSize
         private readonly Icon activeIcon, inactiveIcon;
         private readonly string[] processNames;
         private string profilesMenuSignature;
-        private bool profilesEditorOpen;
+        private bool visualBusy;
+        private readonly Queue<Action> pendingOperations = new Queue<Action>();
         private readonly UpdateManager updater;
         private UpdatePlan pendingUpdate;
         private bool checkingUpdates, installUpdate, manualInstallRequested;
@@ -47,7 +48,8 @@ namespace AMZ.ScreenSize
             quitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, QuitName);
             dispatcher = new Control(); IntPtr unused = dispatcher.Handle;
             activeIcon = MakeIcon(true); inactiveIcon = MakeIcon(false);
-            ContextMenuStrip menu = new ContextMenuStrip();
+            UiTheme.Dark = controller.Snapshot().Settings.DarkMode;
+            ContextMenuStrip menu = new ContextMenuStrip { Renderer = new UiMenuRenderer(), Font = UiTheme.Body() };
             menu.Items.Add("Ouvrir AMZ.ScreenSize", null, delegate { ShowWindow(); });
             statusMenu = new ToolStripMenuItem("Connexion…") { Enabled = false }; menu.Items.Add(statusMenu);
             menu.Items.Add(new ToolStripSeparator());
@@ -121,7 +123,7 @@ namespace AMZ.ScreenSize
             if (!quitting && !checkingUpdates && snapshot.Settings.AutoUpdate && DateTime.UtcNow >= nextAutoCheck && updater.CheckDue)
                 CheckForUpdates();
             if (pendingUpdate != null && !quitting && DateTime.UtcNow >= nextInstallAttempt && (manualInstallRequested || updater.InstallRetryDue) &&
-                UpdateManager.CanAutoApply(snapshot.Settings.AutoUpdate || manualInstallRequested, GameRunning(), snapshot.Settings.RestorePending, busy || profilesEditorOpen))
+                UpdateManager.CanAutoApply(snapshot.Settings.AutoUpdate || manualInstallRequested, GameRunning(), snapshot.Settings.RestorePending, busy || window.EditingProfiles || pendingOperations.Count > 0))
             { installUpdate = true; RequestQuit(); return; }
             if (busy || quitting || DateTime.UtcNow < nextAttempt) return;
             bool refresh = DateTime.UtcNow >= nextRead;
@@ -129,12 +131,16 @@ namespace AMZ.ScreenSize
             {
                 controller.Tick(RunningProcesses());
                 if (refresh) { controller.Refresh(); nextRead = DateTime.UtcNow.AddSeconds(15); }
-            }, false);
+            }, false, true);
         }
-        private void RunOperation(Action operation, bool shutdown)
+        private void RunOperation(Action operation, bool shutdown, bool quiet = false)
         {
-            if (busy) return;
-            busy = true; Render();
+            if (busy)
+            {
+                if (!quiet && !shutdown && !quitting) { pendingOperations.Enqueue(operation); visualBusy = true; Render(); }
+                return;
+            }
+            busy = true; visualBusy = !quiet; Render();
             Task.Factory.StartNew(delegate
             {
                 Exception failure = null;
@@ -142,7 +148,7 @@ namespace AMZ.ScreenSize
                 catch (Exception error) { failure = error; controller.RecordError(error); }
                 dispatcher.BeginInvoke((Action)delegate
                 {
-                    busy = false;
+                    busy = false; visualBusy = false;
                     if (failure != null)
                     {
                         nextAttempt = DateTime.UtcNow.AddSeconds(10);
@@ -156,6 +162,7 @@ namespace AMZ.ScreenSize
                     }
                     else nextAttempt = DateTime.MinValue;
                     Render();
+                    if (!quiet && !shutdown) window.ShowFeedback(failure == null ? "Modifications appliquées" : failure.Message, failure != null);
                     if (shutdown && failure == null)
                     {
                         if (installUpdate)
@@ -174,20 +181,21 @@ namespace AMZ.ScreenSize
                         allowedClose = true; window.AllowExit = true; tray.Visible = false; window.Close(); ExitThread(); return;
                     }
                     if (quitting && !shutdown) QueueShutdown();
+                    else if (!quitting && pendingOperations.Count > 0) RunOperation(pendingOperations.Dequeue(), false);
                 });
             });
         }
         private void Render()
         {
             AppSnapshot snapshot = controller.Snapshot();
-            window.Render(snapshot, busy || quitting);
-            window.SetUpdateStatus(updateMessage, pendingUpdate != null, checkingUpdates || busy || quitting);
+            window.Render(snapshot, visualBusy || quitting);
+            window.SetUpdateStatus(updateMessage, pendingUpdate != null, checkingUpdates || visualBusy || quitting);
             updatingMenu = true;
             try
             {
                 enabledMenu.Checked = snapshot.Settings.Enabled;
                 enabledMenu.Enabled = !busy && !quitting;
-                formatsMenu.Enabled = !busy && !quitting;
+                formatsMenu.Enabled = !busy && !quitting && !window.HasUnsavedProfiles;
                 string signature = string.Join("|", snapshot.Settings.Profiles.Select(profile => profile.Id + ":" + profile.Name + ":" + profile.TargetMode + ":" + profile.Enabled));
                 if (signature != profilesMenuSignature)
                 {
@@ -221,19 +229,12 @@ namespace AMZ.ScreenSize
         public void SaveProfileTarget(string id, int value) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.SetProfileTarget(id, value); }, false); }
         public void EditProfiles()
         {
-            if (busy || quitting) return;
-            profilesEditorOpen = true;
-            try
-            {
-                using (ProfilesForm editor = new ProfilesForm(controller.Snapshot().Settings.Profiles, activeIcon))
-                    if (editor.ShowDialog(window) == DialogResult.OK)
-                    {
-                        List<GameProfile> profiles = editor.Result;
-                        RunOperation(delegate { controller.SetProfiles(profiles); }, false);
-                    }
-            }
-            finally { profilesEditorOpen = false; }
+            ShowWindow(); window.Navigate(1);
         }
+        public void SaveProfiles(List<GameProfile> profiles)
+        { RunOperation(delegate { controller.SetProfiles(profiles); }, false); }
+        public void SetDarkMode(bool dark)
+        { RunOperation(delegate { controller.SetDarkMode(dark); }, false); }
         public void SetEnabled(bool enabled) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.SetEnabled(enabled); }, false); }
         public void RefreshMonitor() { nextAttempt = DateTime.MinValue; RunOperation(controller.Refresh, false); }
         public bool AutoUpdatesEnabled { get { return controller.Snapshot().Settings.AutoUpdate; } }
@@ -300,6 +301,8 @@ namespace AMZ.ScreenSize
         private void RequestQuit()
         {
             if (quitting) return;
+            if (window.HasUnsavedProfiles && !installUpdate && MessageBox.Show(window, "Les profils contiennent des modifications non enregistrées. Quitter sans les enregistrer ?", "Quitter AMZ.ScreenSize", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+            pendingOperations.Clear();
             quitting = true; timer.Stop(); Render();
             if (!busy) QueueShutdown();
         }

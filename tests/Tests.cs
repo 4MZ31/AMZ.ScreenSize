@@ -41,6 +41,8 @@ internal static class Tests
         public bool AutoUpdatesEnabled { get { return true; } }
         public void SetAutoUpdates(bool enabled) { }
         public void CheckForUpdates() { }
+        public void SaveProfiles(List<GameProfile> profiles) { }
+        public void SetDarkMode(bool dark) { }
     }
     private static int checks;
     private static void Assert(bool condition, string name)
@@ -246,6 +248,69 @@ internal static class Tests
         Assert(!store.Persisted.AutoUpdate && monitor.Writes == 0, "automatic update preference persists without monitor changes");
         Assert(UpdateManager.QuoteArgument("C:\\Screens With Spaces\\") == "\"C:\\Screens With Spaces\\\\\"", "updater paths with spaces and trailing slash quoted correctly");
     }
+    private static T Field<T>(object target, string name) where T : class
+    { return (T)target.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance).GetValue(target); }
+    private static double Luminance(Color c)
+    {
+        double[] channels = { c.R / 255.0, c.G / 255.0, c.B / 255.0 };
+        for (int i = 0; i < channels.Length; i++) channels[i] = channels[i] <= 0.04045 ? channels[i] / 12.92 : Math.Pow((channels[i] + 0.055) / 1.055, 2.4);
+        return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    }
+    private static double Contrast(Color a, Color b)
+    { double x = Luminance(a), y = Luminance(b); return (Math.Max(x, y) + 0.05) / (Math.Min(x, y) + 0.05); }
+    private static void Interface()
+    {
+        using (MemoryStream stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("{}")))
+        {
+            AppSettings migrated = (AppSettings)new DataContractJsonSerializer(typeof(AppSettings)).ReadObject(stream);
+            Assert(migrated.DarkMode, "legacy preferences default to dark without resetting other settings");
+        }
+        FakeMonitor monitor = new FakeMonitor(); MemoryStore store = new MemoryStore();
+        AutomationController controller = Make(monitor, store, new AppSettings()); controller.SetDarkMode(false);
+        Assert(!store.Persisted.DarkMode && monitor.Writes == 0, "theme persists independently of monitor and automation");
+        using (MemoryStream stream = new MemoryStream())
+        {
+            DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(AppSettings)); serializer.WriteObject(stream, store.Persisted); stream.Position = 0;
+            Assert(!((AppSettings)serializer.ReadObject(stream)).DarkMode, "explicit light theme survives serialization");
+        }
+        foreach (bool dark in new[] { true, false })
+        {
+            UiTheme.Dark = dark;
+            Assert(new[] { UiTheme.Text, UiTheme.Secondary, UiTheme.Muted }.All(c => Contrast(c, UiTheme.Surface) >= 4.5 && Contrast(c, UiTheme.Canvas) >= 4.5), "text contrast across " + (dark ? "dark" : "light") + " surfaces");
+            Assert(Contrast(UiTheme.Accent, UiTheme.Selection) >= 4.5, "selection contrast in " + (dark ? "dark" : "light") + " theme");
+        }
+        UiTheme.Dark = true;
+        using (Form host = new Form { ClientSize = new Size(900, 520) })
+        using (ProfilesPanel panel = new ProfilesPanel(new[] { GameProfile.CounterStrike(7) }, SystemIcons.Application, null))
+        {
+            host.Controls.Add(panel); host.Show(); Application.DoEvents();
+            TextBox name = Field<TextBox>(panel, "name"); UiButton save = Field<UiButton>(panel, "save");
+            name.Text = "My custom name"; panel.Render(new[] { GameProfile.CounterStrike(7) }, false);
+            Assert(panel.Dirty && name.Text == "My custom name", "periodic snapshots preserve unsaved profile edits");
+            List<GameProfile> valid = panel.ValidatedDraft(); save.PerformClick(); panel.Render(new[] { GameProfile.CounterStrike(7) }, false);
+            Assert(panel.Dirty, "unacknowledged or failed save preserves draft");
+            panel.Render(valid, false); Assert(!panel.Dirty, "successful persisted snapshot acknowledges profile save");
+            name.Text = ""; save.PerformClick();
+            Assert(panel.Dirty && Field<Label>(panel, "message").Text.Length > 0, "invalid profile gets inline validation without closing editor");
+            Field<UiButton>(panel, "cancel").PerformClick(); Assert(!panel.Dirty && name.Text == "My custom name", "cancel returns to latest committed profiles");
+            name.Text = "Unsaved"; valid[0].Name = "Externally saved"; panel.Render(valid, false);
+            Field<UiButton>(panel, "cancel").PerformClick(); Assert(name.Text == "Externally saved", "cancel respects newer committed state while draft is open");
+            host.Close();
+        }
+        using (MainForm form = new MainForm(new PreviewActions(), SystemIcons.Application))
+        {
+            AppSnapshot snapshot = new AppSnapshot { Settings = new AppSettings(), CurrentMode = 1, Connected = true, Status = "Ready" };
+            form.Render(snapshot, false); form.Navigate(2); form.Show(); Application.DoEvents();
+            Assert(Field<UiButton>(form, "dark").Selected, "default theme is visible in settings");
+            snapshot.Settings.DarkMode = false; form.Render(snapshot, false);
+            Assert(!UiTheme.Dark && form.BackColor == UiTheme.Canvas && Field<UiButton>(form, "light").Selected, "live theme change updates native window and selected choice");
+            form.SelectPreset(7); Assert(Field<UiButton>(form, "apply").Enabled, "manual format application remains available when idle");
+            snapshot.GameRunning = true; snapshot.Settings.RestorePending = true; form.Render(snapshot, false);
+            Assert(!Field<UiButton>(form, "apply").Enabled, "manual format remains blocked during managed game");
+            form.AllowExit = true; form.Close();
+        }
+        UiTheme.Dark = true;
+    }
     private static void Screenshot(string path, string kind)
     {
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
@@ -254,12 +319,23 @@ internal static class Tests
             new InstalledGame { Name = "Jeu d’exemple", Platform = "Steam", InstallDirectory = "C:\\Games\\Example", Executable = "C:\\Games\\Example\\example.exe" },
             new InstalledGame { Name = "Autre jeu", Platform = "Epic Games", InstallDirectory = "C:\\Games\\Other", Executable = "C:\\Games\\Other\\other.exe" }
         });
-        Form selectedForm = kind == "profiles" ? (Form)new ProfilesForm(examples, SystemIcons.Application, games) :
-            kind == "discovery" ? (Form)new GameDiscoveryForm(new GameProfile[0], 7, SystemIcons.Application, games) : new MainForm(new PreviewActions(), SystemIcons.Application);
+        UiTheme.Dark = !kind.Contains("light");
+        Form selectedForm = kind == "discovery" ? (Form)new GameDiscoveryForm(new GameProfile[0], 7, SystemIcons.Application, games) : new MainForm(new PreviewActions(), SystemIcons.Application);
         using (Form form = selectedForm)
         {
             MainForm main = form as MainForm;
-            if (main != null) main.Render(new AppSnapshot { Settings = new AppSettings(), CurrentMode = 1, Connected = true, Status = "Prêt · en attente d’un jeu" }, false);
+            if (main != null)
+            {
+                main.Render(new AppSnapshot { Settings = new AppSettings { Profiles = examples, DarkMode = UiTheme.Dark }, CurrentMode = 1, Connected = true, Status = "Prêt · en attente d’un jeu" }, false);
+                if (kind == "profiles")
+                {
+                    ProfilesPanel panel = Field<ProfilesPanel>(main, "profiles");
+                    typeof(ProfilesPanel).GetField("detection", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(panel, games);
+                    main.Navigate(1);
+                }
+                if (kind.Contains("settings")) main.Navigate(2);
+                if (kind == "minimum") main.Size = main.MinimumSize;
+            }
             form.Show(); Application.DoEvents();
             for (int frame = 0; frame < 20; frame++) { System.Threading.Thread.Sleep(10); Application.DoEvents(); }
             using (Bitmap bitmap = new Bitmap(form.ClientSize.Width, form.ClientSize.Height))
@@ -284,13 +360,17 @@ internal static class Tests
             if (args.Length == 2 && args[0] == "--screenshot") { Screenshot(args[1], "main"); return 0; }
             if (args.Length == 2 && args[0] == "--profiles-screenshot") { Screenshot(args[1], "profiles"); return 0; }
             if (args.Length == 2 && args[0] == "--discovery-screenshot") { Screenshot(args[1], "discovery"); return 0; }
+            if (args.Length == 2 && args[0] == "--settings-screenshot") { Screenshot(args[1], "settings"); return 0; }
+            if (args.Length == 2 && args[0] == "--light-screenshot") { Screenshot(args[1], "light"); return 0; }
+            if (args.Length == 2 && args[0] == "--settings-light-screenshot") { Screenshot(args[1], "settings-light"); return 0; }
+            if (args.Length == 2 && args[0] == "--minimum-screenshot") { Screenshot(args[1], "minimum"); return 0; }
             if (args.Length == 1 && args[0] == "--discover")
             {
                 List<InstalledGame> games = GameDiscovery.Discover(GameDiscovery.SystemOptions());
                 foreach (InstalledGame game in games) Console.WriteLine(game.Platform + " | " + game.Name + " | " + game.ProcessName);
                 Console.WriteLine("DETECTED " + games.Count + " games; " + games.Count(game => !string.IsNullOrEmpty(game.ProcessName)) + " executables"); return 0;
             }
-            Offline(); Updates(); Profiles(); DiscoverGames();
+            Offline(); Updates(); Profiles(); DiscoverGames(); Interface();
             if (Array.IndexOf(args, "--hardware") >= 0) Hardware();
             Console.WriteLine("PASS: " + checks + " checks"); return 0;
         }

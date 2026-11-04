@@ -47,6 +47,8 @@ namespace AMZ.ScreenSize
         { AppSettings next = state.Copy(); next.Enabled = enabled; Persist(next); log("AUTOMATION enabled=" + enabled); Tick(runningProcesses); }
         public void SetAutoUpdate(bool enabled)
         { AppSettings next = state.Copy(); next.AutoUpdate = enabled; Persist(next); log("AUTO_UPDATE enabled=" + enabled); }
+        public void SetDarkMode(bool dark)
+        { AppSettings next = state.Copy(); next.DarkMode = dark; Persist(next); log("THEME dark=" + dark); }
         public void SetTarget(int value)
         {
             if (!ScreenPreset.IsSelectable(value)) throw new ArgumentOutOfRangeException("value");

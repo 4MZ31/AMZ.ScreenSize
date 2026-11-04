@@ -2,7 +2,7 @@
 
 Choisir la taille d’image de son **Samsung Odyssey G4** depuis Windows et appliquer automatiquement un format différent pour chaque jeu.
 
-Une application Windows portable, avec une interface en français et une icône dans la zone de notification.
+Une application Windows portable, avec une interface en français, un thème sombre par défaut et une icône dans la zone de notification. Trois espaces : **Écran**, **Profils de jeux** et **Réglages**.
 
 ![Interface AMZ.ScreenSize : formats prédéfinis, aperçu et profils de jeux](docs/interface.png)
 
@@ -18,8 +18,16 @@ L’exécutable est autonome : aucun script PowerShell ni fichier source n’est
 
 1. Ouvrir `AMZ.ScreenSize.exe`.
 2. Choisir un format dans la liste de gauche ; l’aperçu montre la zone d’image attendue.
-3. Cliquer sur **Appliquer maintenant** pour l’utiliser immédiatement, ou choisir un jeu dans la liste **Profils de jeux** et cliquer sur **Utiliser pour le profil**.
-4. Cocher **Activer les profils automatiques** pour appliquer les profils au lancement des jeux.
+3. Cliquer sur **Appliquer** pour l’utiliser immédiatement, ou sur **Attribuer à un jeu** pour enregistrer ce format dans un profil.
+4. Ouvrir **Profils de jeux** pour configurer les jeux et activer **Changer automatiquement le format**.
+
+### Apparence et réglages
+
+Dans **Réglages → Apparence**, choisir **Sombre** ou **Clair**. Le changement s’applique immédiatement à l’interface et aux menus de notification ; le choix est conservé au prochain lancement. Le thème sombre s’applique aussi par défaut lors de la migration d’une ancienne version.
+
+![Réglages : apparence, démarrage, mises à jour et diagnostic](docs/settings.png)
+
+Le lancement avec Windows, les mises à jour et le journal sont regroupés sur cette page. [Voir le thème clair](docs/interface-light.png).
 
 Les huit préréglages du G4 sont disponibles :
 
@@ -36,11 +44,11 @@ Il s’agit des réglages **Taille de l’écran / Screen Size** du moniteur. L�
 
 ### Créer des profils par jeu
 
-Ouvrir **Gérer / détecter…**. Chaque profil possède un nom, un ou plusieurs processus, un format et une case d’activation indépendante.
+Ouvrir **Profils de jeux** dans la navigation. Chaque profil possède un nom, un ou plusieurs exécutables, un format et une activation indépendante. La liste et l’éditeur sont réunis sur la même page.
 
 ![Gestion des profils de jeux](docs/profiles.png)
 
-Cliquer sur **Ajouter un jeu**, saisir son nom et choisir son `.exe`, ou indiquer les noms de processus séparés par `;` ou une virgule. Par exemple `game.exe ; game-win64.exe`. Choisir le format souhaité puis **Enregistrer les profils**. Les profils peuvent être modifiés, désactivés ou supprimés dans cette fenêtre.
+Cliquer sur **Ajouter un jeu**, saisir son nom et choisir son `.exe`, ou indiquer les noms de processus séparés par `;` ou une virgule. Par exemple `game.exe ; game-win64.exe`. Choisir le format souhaité puis **Enregistrer**. **Annuler** rétablit les derniers profils enregistrés. Les brouillons restent présents en changeant de page ; une erreur de validation est affichée dans l’éditeur. L’installation d’une mise à jour attend la fin de ces modifications.
 
 Le processus choisi doit être celui du jeu qui reste ouvert pendant la partie, pas celui du lanceur Steam ou Epic. La comparaison ignore la casse et accepte les noms avec ou sans `.exe`. Un même processus ne peut pas appartenir à plusieurs profils : les jeux partageant exactement le même nom d’exécutable doivent utiliser un profil commun ou être configurés manuellement.
 
@@ -48,11 +56,11 @@ Les préférences de la version 1.0 sont reprises automatiquement dans un profil
 
 ### Détecter les jeux installés
 
-La recherche démarre automatiquement à l’ouverture de la gestion des profils. Le bouton **Jeux installés…** ouvre la liste ; **Actualiser** relance la détection.
+La recherche démarre automatiquement à l’ouverture de la page des profils. Le bouton **Détecter les jeux**, puis **Jeux installés (n)**, ouvre la liste ; **Actualiser** relance la détection.
 
 ![Détection et sélection des jeux installés, données d’exemple](docs/discovery.png)
 
-Cocher les jeux souhaités, choisir le format initial de leurs profils, puis cliquer sur **Créer les profils sélectionnés**. Chaque format pourra ensuite être ajusté séparément. Les jeux déjà associés à un profil sont signalés pour éviter les doublons. Aucun profil n’est créé ou activé sans cette sélection et l’enregistrement des profils.
+Cocher les jeux souhaités, choisir le format initial de leurs profils, puis cliquer sur **Ajouter n profils**. Le compteur confirme la sélection, même pendant une recherche. Chaque format pourra ensuite être ajusté séparément. Les jeux déjà associés à un profil sont signalés pour éviter les doublons. Aucun profil n’est créé ou activé sans cette sélection et l’enregistrement des profils.
 
 La détection lit les sources locales suivantes, sans connexion aux comptes des lanceurs et sans parcours complet des disques :
 
@@ -84,15 +92,15 @@ Fermer ou réduire la fenêtre conserve l’application en arrière-plan. Utilis
 - **Clic droit :** activer/désactiver l’automatisme, gérer les profils, changer leurs formats ou quitter proprement.
 - **Icône verte :** automatisme actif ; **icône grise :** désactivé.
 
-Cocher **Lancer avec Windows** pour démarrer en arrière-plan avec la session. Conserver l’exécutable à son emplacement après avoir activé cette option ; la décocher puis la recocher actualise le chemin si le fichier a été déplacé.
+Cocher **Lancer avec Windows** dans **Réglages** pour démarrer en arrière-plan avec la session. Conserver l’exécutable à son emplacement après avoir activé cette option ; la décocher puis la recocher actualise le chemin si le fichier a été déplacé.
 
 ### Mises à jour automatiques
 
-L’option **Mises à jour automatiques** est activée par défaut et peut être décochée dans l’interface. L’application consulte la dernière release stable de ce dépôt après son lancement, puis au plus une fois par jour. Le bouton **Vérifier les mises à jour** permet de lancer une recherche manuelle.
+L’option **Télécharger et installer automatiquement** est activée par défaut dans **Réglages → Mises à jour**. L’application consulte la dernière release stable de ce dépôt après son lancement, puis au plus une fois par jour. Le bouton **Vérifier les mises à jour** permet de lancer une recherche manuelle.
 
 Lorsqu’une version plus récente existe, l’application télécharge l’EXE et son fichier `SHA256SUMS.txt` en HTTPS depuis les releases de `4MZ31/AMZ.ScreenSize`. Elle vérifie l’empreinte SHA-256, le nom de l’assembly et sa version avant toute installation. Les préversions, les versions anciennes et les fichiers dont la vérification échoue sont refusés.
 
-L’installation automatique attend que les jeux des profils soient fermés, que le format d’origine ait été restauré et que la gestion des profils ne soit pas ouverte. Un assistant local remplace alors l’EXE et relance l’application, avec les mêmes préférences et le même état de fenêtre. Si les mises à jour automatiques sont désactivées, une mise à jour téléchargée peut être installée avec **Installer la mise à jour**.
+L’installation automatique attend que les jeux des profils soient fermés, que le format d’origine ait été restauré et qu’aucun brouillon de profils ou dialogue de détection ne soit ouvert. Un assistant local remplace alors l’EXE et relance l’application, avec les mêmes préférences et le même état de fenêtre. Si les mises à jour automatiques sont désactivées, une mise à jour téléchargée peut être installée avec **Installer la mise à jour**.
 
 L’ancien EXE est conservé à côté du nouveau sous le nom `AMZ.ScreenSize.exe.previous`. Un remplacement qui échoue conserve l’exécutable en place et n’est pas retenté automatiquement pendant une heure, pour éviter une boucle de redémarrages. Le journal indique le résultat. Le dossier de l’exécutable doit être accessible en écriture sans élévation ; un dossier utilisateur convient.
 
@@ -113,7 +121,7 @@ Les préférences et le journal local sont enregistrés ici :
 %LOCALAPPDATA%\AMZ.ScreenSize\activity.log
 ```
 
-Le bouton **Journal** ouvre le journal local. L’application ne collecte ni ne transmet de télémétrie et n’injecte aucun code dans le jeu. L’accès réseau est limité aux recherches et téléchargements de mises à jour GitHub ; le contrôle du moniteur fonctionne hors ligne.
+Le bouton **Ouvrir le journal**, dans **Réglages**, ouvre le journal local. L’application ne collecte ni ne transmet de télémétrie et n’injecte aucun code dans le jeu. L’accès réseau est limité aux recherches et téléchargements de mises à jour GitHub ; le contrôle du moniteur fonctionne hors ligne.
 
 Deux commandes de diagnostic sont disponibles :
 
@@ -141,7 +149,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test -Packa
 - Tests : `bin\Release\AMZ.ScreenSize.Tests.exe`.
 - Fichiers distribuables : `dist\`.
 
-Les **78 assertions hors matériel** comprennent 74 vérifications de logique, de persistance, de profils, de détection d’installations et de validation des mises à jour, ainsi que quatre tests isolés du remplacement réel d’un EXE, de sa sauvegarde, de son redémarrage et du rejet d’un fichier invalide. La détection est testée avec des bibliothèques Steam multiples, des manifestes Epic, une installation Xbox et des entrées invalides. Les workflows GitHub exécutent ces tests sans écran physique et sans modifier une installation utilisateur.
+Les **95 assertions hors matériel** comprennent 91 vérifications de logique, persistance, profils, détection, interface et validation des mises à jour, ainsi que quatre tests isolés du remplacement réel d’un EXE, de sa sauvegarde, de son redémarrage et du rejet d’un fichier invalide. Elles couvrent aussi les deux thèmes, les contrastes de texte, la migration du thème, la conservation des brouillons, les erreurs de validation et l’acquittement des sauvegardes. Les workflows GitHub exécutent ces tests sans écran physique et sans modifier une installation utilisateur.
 
 Pour lancer volontairement le test matériel sur un G4 compatible, hors partie :
 
@@ -187,3 +195,5 @@ La correspondance utilisée est `0=Auto`, `1=Wide`, `2=17″ 4:3`, `3=19″ 4:3`
 ## Licence
 
 [MIT](LICENSE) — © 2026 4MZ31. Projet indépendant, sans affiliation avec Samsung ou Valve.
+
+La refonte de l’interface suit la méthodologie [Unslop](https://github.com/heydamir/unslop) de **Damir Sokolovsky (@heydamir)**, sous [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). [Audit, direction et compte rendu des neuf passes](docs/ux-redesign.md). Les composants Windows Forms et les pictogrammes du projet sont réalisés localement.
