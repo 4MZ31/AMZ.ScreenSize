@@ -1,8 +1,8 @@
 # AMZ.ScreenSize
 
-Choisir la taille d’image de son **Samsung Odyssey G4** depuis Windows et appliquer automatiquement un format différent pour chaque jeu.
+Choisir le format d’image des moniteurs HDMI ou DisplayPort compatibles depuis Windows et appliquer automatiquement un format différent pour chaque jeu.
 
-Une application Windows portable, avec une interface en français, un thème sombre par défaut et une icône dans la zone de notification. Trois espaces : **Écran**, **Profils de jeux** et **Réglages**.
+Une application Windows portable, avec une interface en français, un thème sombre par défaut et une icône dans la zone de notification. Quatre espaces : **Écran**, **Profils de jeux**, **Réglages** et **Moniteurs**.
 
 ![Interface AMZ.ScreenSize : formats prédéfinis, aperçu et profils de jeux](docs/interface.png)
 
@@ -12,14 +12,20 @@ Télécharger **[AMZ.ScreenSize.exe dans la dernière release](https://github.co
 
 L’exécutable est autonome : aucun script PowerShell ni fichier source n’est nécessaire pour l’utiliser. Il s’appuie sur .NET Framework installé dans Windows.
 
-**Configuration :** Windows 10/11 64 bits avec .NET Framework 4.8 ou supérieur. La configuration vérifiée est un Samsung Odyssey G4 **S27BG400EU / SAM727E**, connecté en **DisplayPort**, avec une AMD Radeon RX 7800 XT. Les autres modèles et les connexions HDMI n’ont pas été validés.
+**Configuration :** Windows 10/11 64 bits avec .NET Framework 4.8 ou supérieur. La configuration vérifiée est un Samsung Odyssey G4 **S27BG400EU / SAM727E**, connecté en **DisplayPort**, avec une AMD Radeon RX 7800 XT. Le G27F et le MAG272CQR ont également été détectés en HDMI et interrogés en lecture seule. Leur commande de redimensionnement n’a pas été identifiée.
 
 ## Utiliser l’application
 
 1. Ouvrir `AMZ.ScreenSize.exe`.
-2. Choisir un format dans la liste de gauche ; l’aperçu montre la zone d’image attendue.
+2. Dans **Écran**, ouvrir le sélecteur, cocher les moniteurs souhaités et valider. Choisir ensuite un format commun dans la liste.
 3. Cliquer sur **Appliquer** pour l’utiliser immédiatement, ou sur **Attribuer à un jeu** pour enregistrer ce format dans un profil.
 4. Ouvrir **Profils de jeux** pour configurer les jeux et activer **Changer automatiquement le format**.
+
+### Détection HDMI et DisplayPort
+
+À l’ouverture et lors d’un changement de branchement, la détection identifie le connecteur de chaque trajet vidéo actif avec [QueryDisplayConfig](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-querydisplayconfig). Seuls les trajets HDMI et DisplayPort externes associés à un moniteur physique unique sont interrogés par DDC/CI.
+
+Un modèle inconnu entre dans le sélecteur si sa réponse MCCS annonce plusieurs valeurs de mise à l’échelle standard reconnues pour la commande 0x86 et si sa valeur actuelle correspond. Les variantes documentées SAM727E, SAM7476, SAM06A3 et ACI28A7 ont leur propre correspondance. Sur ACR0692, 0x86 désigne la netteté. Les appareils indéterminés figurent uniquement dans **Moniteurs**. Une déclaration du constructeur peut être incomplète ou erronée. Chaque application de format est vérifiée par relecture. [Base ddccontrol-db](https://github.com/ddccontrol/ddccontrol-db/tree/master/db/monitor) · [Limites des capacités DDC](https://www.ddcutil.com/command_capabilities/).
 
 ### Apparence et réglages
 
@@ -29,7 +35,7 @@ Dans **Réglages → Apparence**, choisir **Sombre** ou **Clair**. Le changement
 
 Le lancement avec Windows, les mises à jour et le journal sont regroupés sur cette page. [Voir le thème clair](docs/interface-light.png).
 
-Les huit préréglages du G4 sont disponibles :
+Avec un G4 sélectionné seul, les huit préréglages suivants sont disponibles :
 
 - **Auto** — conserve le format de la source.
 - **Wide** — utilise toute la surface de l’écran.
@@ -108,7 +114,7 @@ Les empreintes détectent un téléchargement altéré ; elles ne remplacent pas
 
 ## Compatibilité et diagnostic
 
-Le moniteur est identifié par son ID matériel `SAM727E`, indépendamment du numéro d’écran Windows. L’application refuse de sélectionner arbitrairement un écran si plusieurs modèles identiques sont connectés. Elle ne commande pas les autres moniteurs.
+Chaque moniteur sélectionné est identifié par son chemin de périphérique Windows. Une configuration antérieure est associée automatiquement au G4 seulement s’il est identifiable sans ambiguïté. Après un changement de port, vérifiez la sélection.
 
 Les huit codes ont été appliqués et relus sur le S27BG400EU de test. Le mode initial a été restauré après les essais. Un aller-retour automatique avec un processus de test a également été vérifié.
 
@@ -123,11 +129,14 @@ Les préférences et le journal local sont enregistrés ici :
 
 Le bouton **Ouvrir le journal**, dans **Réglages**, ouvre le journal local. L’application ne collecte ni ne transmet de télémétrie et n’injecte aucun code dans le jeu. L’accès réseau est limité aux recherches et téléchargements de mises à jour GitHub ; le contrôle du moniteur fonctionne hors ligne.
 
-Deux commandes de diagnostic sont disponibles :
+Le diagnostic multi-écrans inventorie les moniteurs actifs, enregistre leurs capacités DDC/CI et lit la commande de mise à l’échelle `0x86`. Pour le modèle `SAM727E`, il lit aussi la commande Samsung connue. Le rapport distingue une lecture réussie, une commande seulement annoncée et un résultat indéterminé. Une lecture seule ne valide ni les valeurs à écrire ni la restauration d’un mode. La page **Écran** propose les appareils identifiés dans un menu à cases à cocher. Valider la sélection affiche les formats communs. Le logiciel traduit le format en code propre à chaque modèle et enregistre séparément la valeur initiale de chaque écran avant de l’appliquer. La sélection et les restaurations en attente sont conservées au redémarrage.
 
 ```powershell
 # Exporter le format actuel, sans le modifier.
 .\AMZ.ScreenSize.exe --diagnostic "$env:TEMP\screen-size.json"
+
+# Inventorier tous les écrans actifs, sans modifier leurs réglages.
+.\AMZ.ScreenSize.exe --scan-monitors "$env:TEMP\moniteurs.json"
 
 # Demander la fermeture de l’instance existante avec restauration.
 .\AMZ.ScreenSize.exe --quit
@@ -149,7 +158,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test -Packa
 - Tests : `bin\Release\AMZ.ScreenSize.Tests.exe`.
 - Fichiers distribuables : `dist\`.
 
-Les **114 assertions hors matériel** comprennent 110 vérifications de logique, persistance, profils, détection, interface et validation des mises à jour, ainsi que quatre tests isolés du remplacement réel d’un EXE, de sa sauvegarde, de son redémarrage et du rejet d’un fichier invalide. Elles couvrent aussi les deux thèmes, les contrastes, la peinture complète des boutons et interrupteurs, la hauteur de navigation, l’absence de chevauchement au démarrage et dans les profils à taille minimale, les brouillons et la création intégrée de profils, à l’unité ou en groupe. Les workflows GitHub exécutent ces tests sans écran physique et sans modifier une installation utilisateur.
+Les **130 assertions hors matériel** comprennent 126 vérifications de logique, persistance, profils, détection, interface et validation des mises à jour, ainsi que quatre tests isolés du remplacement réel d’un EXE, de sa sauvegarde, de son redémarrage et du rejet d’un fichier invalide. Elles couvrent aussi les deux thèmes, les contrastes, la peinture complète des boutons et interrupteurs, la hauteur de navigation, l’absence de chevauchement au démarrage et dans les profils à taille minimale, les brouillons et la création intégrée de profils, à l’unité ou en groupe. Les workflows GitHub exécutent ces tests sans écran physique et sans modifier une installation utilisateur.
 
 Pour lancer volontairement le test matériel sur un G4 compatible, hors partie :
 

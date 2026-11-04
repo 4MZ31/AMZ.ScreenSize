@@ -24,10 +24,28 @@ namespace AMZ.ScreenSize
             new ScreenPreset(6, "22\u2033 Wide", "16:10", 22, 16.0 / 10),
             new ScreenPreset(7, "23\u2033 Wide", "16:9", 23, 16.0 / 9)
         });
-        public string Label { get { return Value < 2 ? Name : Name + " (" + Ratio + ")"; } }
+        private static readonly Dictionary<int,ScreenPreset> extra = BuildExtra();
+        private static Dictionary<int,ScreenPreset> BuildExtra()
+        {
+            var items = new Dictionary<int,ScreenPreset>();
+            items[27] = new ScreenPreset(27, "27″ Wide", "16:9", 27, 16.0/9);
+            items[29] = new ScreenPreset(29, "29″ Wide", "21:9", 29, 21.0/9);
+            string[] names = { "Taille originale", "Ajuster en conservant le ratio", "Ajuster en hauteur", "Ajuster en largeur",
+                "Étirement vertical", "Étirement horizontal", "Expansion horizontale", "Zoom sur les deux axes", "Compression", "Expansion non linéaire" };
+            for (int i = 0; i < names.Length; i++) items[101+i] = new ScreenPreset(101+i, names[i], "", 0, 1);
+            items[112] = new ScreenPreset(112, "Surbalayage", "", 0, 1);
+            return items;
+        }
+        public static ScreenPreset Find(int value)
+        {
+            if (value >= 0 && value < All.Count) return All[value];
+            ScreenPreset preset;
+            return extra.TryGetValue(value, out preset) ? preset : null;
+        }
+        public string Label { get { return Value < 2 || Ratio.Length == 0 ? Name : Name + " (" + Ratio + ")"; } }
         public override string ToString() { return Label; }
-        public static bool IsSelectable(int value) { return value >= 0 && value < All.Count; }
+        public static bool IsSelectable(int value) { return Find(value) != null; }
         public static string Describe(int value)
-        { return IsSelectable(value) ? All[value].Label : "Format " + value; }
+        { return IsSelectable(value) ? Find(value).Label : "Format " + value; }
     }
 }

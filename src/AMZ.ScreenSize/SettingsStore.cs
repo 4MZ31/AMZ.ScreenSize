@@ -16,6 +16,9 @@ namespace AMZ.ScreenSize
         [DataMember] public bool DarkMode = true;
         [DataMember] public int TargetMode = 7;
         [DataMember] public int SelectedMode = 7;
+        [DataMember] public List<string> DisplaySelection;
+        [DataMember] public List<SavedDisplay> DisplayOriginals;
+        [DataMember] public bool ManualRecovery;
         [DataMember] public bool RestorePending;
         [DataMember] public int OriginalMode = 1;
         [DataMember] public List<GameProfile> Profiles;
@@ -24,6 +27,8 @@ namespace AMZ.ScreenSize
         public AppSettings Copy()
         {
             AppSettings value = (AppSettings)MemberwiseClone();
+            value.DisplaySelection = DisplaySelection == null ? null : new List<string>(DisplaySelection);
+            value.DisplayOriginals = DisplayOriginals == null ? null : DisplayOriginals.Select(d => new SavedDisplay { Path=d.Path, Command=d.Command, Raw=d.Raw }).ToList();
             value.Profiles = Profiles == null ? null : Profiles.Select(profile => profile.Copy()).ToList();
             return value;
         }
@@ -31,6 +36,11 @@ namespace AMZ.ScreenSize
         {
             if (!ScreenPreset.IsSelectable(TargetMode) || !ScreenPreset.IsSelectable(SelectedMode) || OriginalMode < 0 || OriginalMode > 9)
                 throw new IOException("Les préférences contiennent un format non reconnu.");
+            if (DisplaySelection != null && (DisplaySelection.Any(string.IsNullOrWhiteSpace) || DisplaySelection.Distinct(StringComparer.OrdinalIgnoreCase).Count() != DisplaySelection.Count))
+                throw new IOException("Sélection de moniteurs invalide.");
+            if (DisplayOriginals != null && (!RestorePending || DisplayOriginals.Count == 0 ||
+                DisplayOriginals.Any(d => d == null || string.IsNullOrEmpty(d.Path) || (d.Command != 0x86 && d.Command != 0xDB) || d.Raw < 0 || d.Raw > 255)))
+                throw new IOException("Sauvegarde des formats de moniteurs invalide.");
             // Missing field means a 1.0 settings file. An explicitly empty list stays empty.
             if (Profiles == null) Profiles = new List<GameProfile> { GameProfile.CounterStrike(TargetMode) };
             Profiles = GameProfile.ValidateAndCopy(Profiles);

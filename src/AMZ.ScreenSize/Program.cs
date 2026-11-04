@@ -41,6 +41,14 @@ namespace AMZ.ScreenSize
             {
                 if (args.Length == 2 && args[0] == "--apply-update") return UpdateManager.ApplyAndRelaunch(args[1]);
                 directory = Argument(args, "--state-dir") ?? directory;
+                string scanPath = Argument(args, "--scan-monitors");
+                if (scanPath != null)
+                {
+                    var displays = DdcTransport.Scan();
+                    using (FileStream output = File.Create(scanPath))
+                        new DataContractJsonSerializer(displays.GetType()).WriteObject(output, displays);
+                    return displays.Count > 0 ? 0 : 1;
+                }
                 string diagnosticPath = Argument(args, "--diagnostic");
                 if (diagnosticPath != null)
                 {
@@ -75,6 +83,7 @@ namespace AMZ.ScreenSize
             catch (Exception error)
             {
                 try { new SettingsStore(directory).Log("STARTUP_ERROR " + error.ToString()); } catch { }
+                if (Array.IndexOf(args, "--scan-monitors") >= 0) { Console.Error.WriteLine(error.Message); return 1; }
                 MessageBox.Show(error.Message, "AMZ.ScreenSize", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
             }

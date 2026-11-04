@@ -7,6 +7,11 @@ using System.Windows.Forms;
 
 namespace AMZ.ScreenSize
 {
+    public interface IDisplayActions
+    {
+        void RequestDiscovery();
+        void SelectDisplays(List<string> paths);
+    }
     public interface IAppActions
     {
         void ApplyManual(int value);
@@ -36,6 +41,11 @@ namespace AMZ.ScreenSize
         private readonly UiButton apply, assign, checkUpdates, dark, light, refresh;
         private readonly UiSwitch automatic, startup, autoUpdates;
         private readonly ProfilesPanel profiles;
+        private readonly DetectedDisplaysPanel inventory;
+        private UiButton displayPicker;
+        private int wantedFormat = 7;
+        private string formatsSignature;
+        private int ChosenMode { get { var preset = presets.SelectedItem as ScreenPreset; return preset == null ? -1 : preset.Value; } }
         private AppSnapshot last;
         private bool rendering, busy;
         private readonly Timer feedbackTimer = new Timer { Interval = 8000 };
@@ -52,17 +62,17 @@ namespace AMZ.ScreenSize
             Panel sidebar = new Panel { Name = "Sidebar", Dock = DockStyle.Left, Width = 232, Padding = new Padding(16, 28, 16, 20), Tag = "sidebar" };
             Label brand = UiTheme.Label("AMZ.ScreenSize", 16); brand.Font = UiTheme.Medium(16); brand.Dock = DockStyle.Top; brand.Height = 40;
             Label tagline = UiTheme.Label("Votre écran, à votre mesure.", 9.5f, "muted"); tagline.Dock = DockStyle.Top; tagline.Height = 32;
-            Panel nav = new Panel { Dock = DockStyle.Top, Height = 156, Tag = "sidebar" };
-            navigation = new UiButton[3];
-            string[] titles = { "Écran", "Profils de jeux", "Réglages" }, symbols = { "screen", "profiles", "settings" };
-            for (int i = 0; i < 3; i++)
+            Panel nav = new Panel { Dock = DockStyle.Top, Height = 196, Tag = "sidebar" };
+            navigation = new UiButton[4];
+            string[] titles = { "Écran", "Profils de jeux", "Réglages", "Moniteurs" }, symbols = { "screen", "profiles", "settings", "screen" };
+            for (int i = 0; i < navigation.Length; i++)
             {
                 int page = i; UiButton button = UiTheme.Button(titles[i]); button.Quiet = true; button.Symbol = symbols[i];
                 button.SetBounds(0, 28 + i * 40, 200, 36); button.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
                 button.Click += delegate { Navigate(page); }; navigation[i] = button; nav.Controls.Add(button);
             }
             Panel device = new Panel { Dock = DockStyle.Bottom, Height = 124, Tag = "sidebar" };
-            Label model = UiTheme.Label("Samsung Odyssey G4"); model.Dock = DockStyle.Top; model.Height = 28;
+            Label model = UiTheme.Label("Moniteurs sélectionnés"); model.Dock = DockStyle.Top; model.Height = 28;
             deviceStatus = UiTheme.Label("Connexion en cours", 9.5f, "muted"); deviceStatus.Dock = DockStyle.Top; deviceStatus.Height = 24;
             Label version = UiTheme.Label("AMZ.ScreenSize  /  " + Program.Version, 9.5f, "muted"); version.Dock = DockStyle.Bottom; version.Height = 32;
             device.Controls.Add(deviceStatus); device.Controls.Add(model); device.Controls.Add(version);
@@ -71,18 +81,22 @@ namespace AMZ.ScreenSize
 
             TableLayoutPanel screen = UiTheme.Table(1, 48, 36, 28, 0, 72, 64);
             screen.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            screen.Controls.Add(UiTheme.Label("Format de l’écran", 24), 0, 0);
+            Panel heading = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0) };
+            displayPicker = UiTheme.Button("Choisir les écrans ▾"); displayPicker.Dock = DockStyle.Right; displayPicker.Width = 280;
+            displayPicker.Click += PickDisplays;
+            heading.Controls.Add(UiTheme.Label("Format de l’écran", 24)); heading.Controls.Add(displayPicker);
+            screen.Controls.Add(heading, 0, 0);
             screen.Controls.Add(UiTheme.Label("Ajustez la zone d’affichage de votre moniteur.", 10.5f, "secondary"), 0, 1);
             TableLayoutPanel chooser = UiTheme.Table(2, 0); chooser.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 252)); chooser.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             presets = new ListBox { Dock = DockStyle.Fill, DrawMode = DrawMode.OwnerDrawFixed, ItemHeight = 44, BorderStyle = BorderStyle.None,
                 IntegralHeight = false, Margin = new Padding(0, 0, 24, 0), AccessibleName = "Formats de l’écran" };
             foreach (ScreenPreset preset in ScreenPreset.All) presets.Items.Add(preset);
             presets.DrawItem += DrawPreset;
-            presets.SelectedIndexChanged += delegate { if (presets.SelectedIndex >= 0) { preview.Preset = ScreenPreset.All[presets.SelectedIndex]; selected.Text = preview.Preset.Label; UpdateButtons(); } };
+            presets.SelectedIndexChanged += delegate { if (presets.SelectedIndex >= 0) { preview.Preset = (ScreenPreset)presets.SelectedItem; wantedFormat = ChosenMode; selected.Text = preview.Preset.Label; UpdateButtons(); } };
             Panel previewArea = new Panel { Dock = DockStyle.Fill, Padding = new Padding(20, 12, 20, 12), Tag = "surface", Margin = new Padding(0) };
             Label previewLabel = UiTheme.Label("Zone d’affichage", 10.5f, "secondary"); previewLabel.Dock = DockStyle.Top; previewLabel.Height = 32;
             selected = UiTheme.Label("23″ Wide (16:9)", 17); selected.Dock = DockStyle.Bottom; selected.Height = 40; selected.TextAlign = ContentAlignment.MiddleCenter;
-            Label caption = UiTheme.Label("Aperçu indicatif sur une dalle de 27″", 9.5f, "muted"); caption.Dock = DockStyle.Bottom; caption.Height = 28; caption.TextAlign = ContentAlignment.MiddleCenter;
+            Label caption = UiTheme.Label("Aperçu indicatif · dalle de référence 27″", 9.5f, "muted"); caption.Dock = DockStyle.Bottom; caption.Height = 28; caption.TextAlign = ContentAlignment.MiddleCenter;
             preview = new ScreenPreview { Dock = DockStyle.Fill, Tag = "surface" };
             previewArea.Controls.Add(preview); previewArea.Controls.Add(previewLabel); previewArea.Controls.Add(selected); previewArea.Controls.Add(caption);
             chooser.Controls.Add(presets, 0, 0); chooser.Controls.Add(previewArea, 1, 0); screen.Controls.Add(chooser, 0, 3);
@@ -90,7 +104,7 @@ namespace AMZ.ScreenSize
             Label note = UiTheme.Label("La résolution Windows reste identique.", 9.5f, "muted");
             FlowLayoutPanel buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
             assign = UiTheme.Button("Attribuer à un jeu"); assign.Width = 172; assign.Margin = new Padding(0, 0, 12, 0); assign.Click += AssignPreset;
-            apply = UiTheme.Button("Appliquer", true); apply.Width = 124; apply.Click += delegate { actions.ApplyManual(presets.SelectedIndex); };
+            apply = UiTheme.Button("Appliquer", true); apply.Width = 124; apply.Click += delegate { actions.ApplyManual(ChosenMode); };
             buttons.Controls.Add(assign); buttons.Controls.Add(apply); commands.Controls.Add(note, 0, 0); commands.Controls.Add(buttons, 1, 0); screen.Controls.Add(commands, 0, 4);
             Panel readout = new Panel { Dock = DockStyle.Fill, Tag = "surface", Padding = new Padding(16, 8, 16, 8), Margin = new Padding(0) };
             current = UiTheme.Label("Format actuel : connexion…"); current.Dock = DockStyle.Top; current.Height = 24;
@@ -129,7 +143,8 @@ namespace AMZ.ScreenSize
             FlowLayoutPanel tools = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, WrapContents = false };
             refresh = UiTheme.Button("Actualiser le moniteur"); refresh.Width = 204; refresh.Margin = new Padding(0, 0, 12, 0); refresh.Click += delegate { actions.RefreshMonitor(); };
             UiButton log = UiTheme.Button("Ouvrir le journal"); log.Width = 172; log.Click += delegate { actions.OpenLog(); }; tools.Controls.Add(refresh); tools.Controls.Add(log); support.Controls.Add(tools); settings.Controls.Add(support, 0, 4);
-            pages = new Control[] { screen, profilePage, settings }; foreach (Control page in pages) { page.Dock = DockStyle.Fill; content.Controls.Add(page); }
+            inventory = new DetectedDisplaysPanel(RequestDiscovery);
+            pages = new Control[] { screen, profilePage, settings, inventory }; foreach (Control page in pages) { page.Dock = DockStyle.Fill; content.Controls.Add(page); }
             Panel bottom = new Panel { Dock = DockStyle.Bottom, Height = 40, Padding = new Padding(32, 0, 32, 0) };
             status = UiTheme.Label("Connexion au moniteur…", 9.5f, "muted"); bottom.Controls.Add(status);
             feedback = UiTheme.Label("", 9.5f); feedback.Visible = false; bottom.Controls.Add(feedback); feedback.BringToFront();
@@ -157,10 +172,16 @@ namespace AMZ.ScreenSize
             pages[index].BringToFront(); feedback.BringToFront();
             if (index == 1) profiles.PrepareDetection();
         }
+        protected override void WndProc(ref Message message)
+        {
+            base.WndProc(ref message);
+            if (message.Msg == 0x007E && inventory != null && IsHandleCreated && !IsDisposed)
+                RequestDiscovery();
+        }
         private void DrawPreset(object sender, DrawItemEventArgs e)
         {
             if (e.Index < 0) return;
-            ScreenPreset preset = ScreenPreset.All[e.Index]; bool chosen = (e.State & DrawItemState.Selected) != 0;
+            ScreenPreset preset = (ScreenPreset)presets.Items[e.Index]; bool chosen = (e.State & DrawItemState.Selected) != 0;
             using (Brush brush = new SolidBrush(chosen ? UiTheme.Selection : UiTheme.Surface)) e.Graphics.FillRectangle(brush, e.Bounds);
             float s = e.Graphics.DpiX / 96;
             UiIcon.Draw(e.Graphics, "crop", new RectangleF(e.Bounds.X + 12 * s, e.Bounds.Y + (e.Bounds.Height - 18 * s) / 2, 18 * s, 18 * s), chosen ? UiTheme.Accent : UiTheme.Muted);
@@ -176,15 +197,15 @@ namespace AMZ.ScreenSize
             foreach (GameProfile profile in last.Settings.Profiles)
             {
                 string id = profile.Id;
-                menu.Items.Add(profile.Name, null, delegate { actions.SaveProfileTarget(id, presets.SelectedIndex); });
+                menu.Items.Add(profile.Name, null, delegate { actions.SaveProfileTarget(id, ChosenMode); });
             }
             menu.Closed += delegate { BeginInvoke((Action)delegate { menu.Dispose(); }); }; menu.Show(assign, new Point(0, assign.Height));
         }
         private void UpdateButtons()
         {
             apply.Enabled = !busy && presets.SelectedIndex >= 0 && last != null && last.Connected && !last.Settings.RestorePending && !(last.GameRunning && last.Settings.Enabled);
-            apply.Text = last != null && last.CurrentMode == presets.SelectedIndex ? "Appliqué" : "Appliquer";
-            if (last != null && last.CurrentMode == presets.SelectedIndex) apply.Enabled = false;
+            apply.Text = last != null && ChosenMode >= 0 && last.CurrentMode == ChosenMode ? "Appliqué" : "Appliquer";
+            if (last != null && ChosenMode >= 0 && last.CurrentMode == ChosenMode) apply.Enabled = false;
             assign.Enabled = !busy && !HasUnsavedProfiles && presets.SelectedIndex >= 0;
             hints.SetToolTip(apply, last != null && (last.Settings.RestorePending || (last.GameRunning && last.Settings.Enabled)) ? "Un profil gère l’écran. Mettez les profils en pause pour appliquer un format manuel." : "Appliquer le format sélectionné au moniteur.");
         }
@@ -194,6 +215,7 @@ namespace AMZ.ScreenSize
             try
             {
                 snapshot.Settings.Validate();
+                RenderDisplays(snapshot, working);
                 if (UiTheme.Dark != snapshot.Settings.DarkMode) { UiTheme.Dark = snapshot.Settings.DarkMode; UiTheme.Apply(this); }
                 dark.Selected = snapshot.Settings.DarkMode; light.Selected = !snapshot.Settings.DarkMode; dark.Invalidate(); light.Invalidate();
                 automatic.Checked = snapshot.Settings.Enabled; automatic.Enabled = !working;
@@ -202,14 +224,76 @@ namespace AMZ.ScreenSize
                 dark.Enabled = light.Enabled = refresh.Enabled = !working;
                 current.Text = "Format actuel  ·  " + (snapshot.CurrentMode >= 0 ? ScreenPreset.Describe(snapshot.CurrentMode) : "indisponible");
                 activity.Text = snapshot.ActiveProfileName != null ? "Profil actif : " + snapshot.ActiveProfileName + " · restauration à la fermeture" : snapshot.Settings.Enabled ? "Profils automatiques actifs · en attente d’un jeu" : "Profils automatiques en pause · le format reste manuel";
-                deviceStatus.Text = snapshot.Connected ? "Connecté · 27″ / DDC-CI" : "Moniteur indisponible";
+                deviceStatus.Text = snapshot.Connected ? "Connecté · DDC/CI" : "Moniteur indisponible";
                 deviceStatus.ForeColor = snapshot.Connected ? UiTheme.Accent : UiTheme.Muted;
                 status.Text = working ? "Opération en cours…" : snapshot.Status;
                 profiles.Render(snapshot.Settings.Profiles, working); UpdateButtons();
             }
             finally { rendering = false; }
         }
-        public void SelectPreset(int value) { if (ScreenPreset.IsSelectable(value)) presets.SelectedIndex = value; }
+        public void SelectPreset(int value)
+        {
+            wantedFormat = value;
+            var preset = ScreenPreset.Find(value);
+            presets.SelectedIndex = preset == null ? -1 : presets.Items.IndexOf(preset);
+        }
+
+        private void RequestDiscovery()
+        { var action = actions as IDisplayActions; if (action != null) action.RequestDiscovery(); }
+
+        private void RenderDisplays(AppSnapshot snapshot, bool working)
+        {
+            if (snapshot.Displays == null) return;
+            inventory.Render(snapshot.Displays);
+            var paths = snapshot.Settings.DisplaySelection ?? new List<string>();
+            var group = MonitorFleet.Selected(snapshot.Displays, paths);
+            int[] common = MonitorFleet.Common(snapshot.Displays, paths);
+            string signature = string.Join(",", common);
+            if (formatsSignature != signature)
+            {
+                int restore = wantedFormat;
+                presets.BeginUpdate();
+                try
+                {
+                    presets.Items.Clear();
+                    foreach (int value in common) presets.Items.Add(ScreenPreset.Find(value));
+                    if (common.Length != 0) SelectPreset(common.Contains(restore) ? restore : common[0]);
+                    else { preview.Preset = null; selected.Text = paths.Count == 0 ? "Sélectionnez un écran" : "Aucun format commun disponible"; }
+                }
+                finally { presets.EndUpdate(); }
+                profiles.SetFormats(common);
+                formatsSignature = signature;
+            }
+            displayPicker.Enabled = !working && !snapshot.Settings.RestorePending;
+            displayPicker.Text = group.Count == 1 && group[0] != null ? group[0].Description + " ▾" :
+                paths.Count > 0 ? paths.Count + " écran(s) sélectionné(s) ▾" : "Choisir les écrans ▾";
+        }
+
+        private void PickDisplays(object sender, EventArgs e)
+        {
+            var action = actions as IDisplayActions;
+            if (action == null || last == null || last.Displays == null) return;
+            var paths = last.Settings.DisplaySelection ?? new List<string>();
+            var menu = new ContextMenuStrip { Renderer = new UiMenuRenderer() };
+            var choices = new List<ToolStripMenuItem>();
+            foreach (DisplayScan display in last.Displays.Where(d => d.Modes.Count > 0 && !string.IsNullOrEmpty(d.DevicePath)))
+            {
+                var item = new ToolStripMenuItem(display.Description + " · " + display.Connector + " · " + display.WindowsDisplay)
+                { CheckOnClick = true, Checked = paths.Contains(display.DevicePath, StringComparer.OrdinalIgnoreCase), Tag = display.DevicePath };
+                choices.Add(item); menu.Items.Add(item);
+            }
+            if (choices.Count == 0) menu.Items.Add(new ToolStripMenuItem("Aucun écran compatible détecté") { Enabled = false });
+            menu.Items.Add(new ToolStripSeparator());
+            bool done = false;
+            menu.Items.Add("Valider la sélection", null, delegate {
+                done = true; action.SelectDisplays(choices.Where(c => c.Checked).Select(c => (string)c.Tag).ToList()); menu.Close();
+            });
+            menu.Closing += delegate(object s, ToolStripDropDownClosingEventArgs args) {
+                if (!done && args.CloseReason == ToolStripDropDownCloseReason.ItemClicked) args.Cancel = true;
+            };
+            menu.Closed += delegate { if (IsHandleCreated) BeginInvoke((Action)delegate { menu.Dispose(); }); };
+            menu.Show(displayPicker, new Point(0, displayPicker.Height));
+        }
         public void ShowFeedback(string text, bool error)
         { feedback.Text = text; hints.SetToolTip(feedback, text); feedback.ForeColor = error ? UiTheme.Danger : UiTheme.Accent; feedback.Visible = true; feedback.BringToFront(); feedbackTimer.Stop(); feedbackTimer.Start(); }
         protected override void Dispose(bool disposing)
@@ -229,6 +313,12 @@ namespace AMZ.ScreenSize
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e); Graphics g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; float s = g.DpiX / 96;
+            if (preset == null || preset.Inches == 0 || preset.Inches > 27)
+            {
+                TextRenderer.DrawText(g, preset == null ? "Aucun aperçu" : preset.Label, Font, ClientRectangle, UiTheme.Secondary,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                return;
+            }
             float w = Math.Max(40, Math.Min(Width - 24 * s, (Height - 64 * s) * 16 / 9f)), h = w * 9 / 16;
             RectangleF frame = new RectangleF((Width - w) / 2, Math.Max(8 * s, (Height - h - 24 * s) / 2), w, h);
             using (GraphicsPath path = UiTheme.Rounded(frame, 8 * s)) using (Brush b = new SolidBrush(UiTheme.Border)) g.FillPath(b, path);

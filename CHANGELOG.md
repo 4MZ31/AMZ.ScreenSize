@@ -1,5 +1,11 @@
 # Historique des versions
 
+## 2.1.0 — 2026-11-04
+
+- Détection des moniteurs HDMI et DisplayPort externe au démarrage et après un changement de topologie.
+- Sélecteur multiple sur la page Écran, formats communs et restauration indépendante par moniteur.
+- Inventaire en lecture seule dans Moniteurs et avec `--scan-monitors`.
+
 ## 2.0.2 — 2026-11-04
 
 - Éditeur de profils dimensionné selon son contenu et défilable lorsque la hauteur disponible est insuffisante.

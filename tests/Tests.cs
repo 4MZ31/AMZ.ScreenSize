@@ -56,6 +56,59 @@ internal static class Tests
     private static AutomationController Make(FakeMonitor monitor, MemoryStore store, AppSettings settings)
     { return new AutomationController(monitor, settings, store.Save, delegate(string text) { }); }
 
+    private sealed class SimFleet : MonitorFleet
+    {
+        public List<DisplayScan> Attached = new List<DisplayScan>();
+        public Dictionary<string,int> Raw = new Dictionary<string,int>();
+        public string Missing, FailOnce;
+        public override List<DisplayScan> Discover() { return Attached; }
+        public override int Read(string path, byte code)
+        { if (path == Missing) throw new IOException("disconnected"); return Raw[path]; }
+        public override void Write(string path, byte code, int value)
+        { Read(path, code); if (path == FailOnce) { FailOnce = null; throw new IOException("write failed"); } Raw[path] = value; }
+    }
+    private static void MultiDisplay()
+    {
+        Assert(DisplayModes.IsVideoConnector(5) && DisplayModes.IsVideoConnector(10) &&
+            new[] { -1, 0, 4, 6, 11, 15, 16, 17, 18, int.MinValue }.All(t => !DisplayModes.IsVideoConnector(t)), "only HDMI and external DisplayPort are eligible for DDC");
+        var first = new DisplayScan { ModelId = "SAM727E", DevicePath = "first" };
+        var second = new DisplayScan { ModelId = "SAM06A3", DevicePath = "second" };
+        var generic = new DisplayScan { DevicePath = "third", ScalingAdvertised = true, ScalingValuesAdvertised = "0102 04" };
+        DisplayModes.Resolve(first, null, 1); DisplayModes.Resolve(second, null, 0);
+        DisplayModes.Resolve(generic, 2, null);
+        Assert(generic.Modes.Count == 3 && generic.Modes[102] == 2, "unknown HDMI/DP model uses explicit MCCS values");
+        DisplayModes.Resolve(generic, 0, null); Assert(generic.Modes.Count == 0, "zero response cannot qualify unknown device");
+        generic.ModelId = "ACR0692"; DisplayModes.Resolve(generic, 2, null);
+        Assert(generic.Modes.Count == 0, "known conflicting sharpness command excluded");
+        var fleet = new SimFleet(); fleet.Attached.Add(first); fleet.Attached.Add(second);
+        fleet.Raw["first"] = 3; fleet.Raw["second"] = 0;
+        var selected = new List<string> { "first", "second" };
+        Assert(MonitorFleet.Common(fleet.Attached, selected).SequenceEqual(new[] { 0, 1 }), "group exposes intersection of semantic modes");
+        var settings = new AppSettings { DisplaySelection = selected, TargetMode = 1 };
+        var store = new MemoryStore();
+        var app = new AutomationController(new FakeMonitor(), settings, store.Save, delegate { }, fleet);
+        app.Discover(); app.Tick(true);
+        Assert(fleet.Raw["first"] == 1 && fleet.Raw["second"] == 4 && store.Persisted.DisplayOriginals.Count == 2, "same group format uses each device code after capturing both baselines");
+        Throws(delegate { app.SelectDisplays(new List<string>()); }, "selection locked during restoration");
+        fleet.Missing = "second";
+        Throws(delegate { app.Tick(false); }, "unplugged display keeps durable restore intent");
+        Assert(fleet.Raw["first"] == 3 && store.Persisted.DisplayOriginals.Single().Path == "second", "reachable display restored independently");
+        var restarted = new AutomationController(new FakeMonitor(), store.Persisted, store.Save, delegate { }, fleet);
+        fleet.Missing = null; restarted.Discover(); restarted.Tick(false);
+        Assert(fleet.Raw["second"] == 0 && !store.Persisted.RestorePending, "relaunch restores the remaining device by path");
+        restarted.ApplyManual(1);
+        Assert(fleet.Raw["first"] == 1 && fleet.Raw["second"] == 4 && !store.Persisted.RestorePending, "manual group apply commits both device values");
+        fleet.Raw["first"] = 3; fleet.Missing = "second";
+        Throws(delegate { restarted.ApplyManual(1); }, "all baselines must be readable before first write");
+        Assert(fleet.Raw["first"] == 3, "failed group preflight preserves first display");
+        fleet.Missing = null;
+        fleet.FailOnce = "second"; fleet.Raw["second"] = 0;
+        Throws(delegate { restarted.ApplyManual(1); }, "failure on second write triggers compensation");
+        Assert(fleet.Raw["first"] == 3 && fleet.Raw["second"] == 0 && !store.Persisted.RestorePending, "partial manual change rolled back to per-device baselines");
+        restarted.SelectDisplays(new List<string>());
+        Throws(delegate { restarted.ApplyManual(1); }, "empty selection never falls back to a monitor");
+    }
+
     private static void Offline()
     {
         Assert(ScreenPreset.All.Count == 8 && ScreenPreset.All[2].Ratio == "4:3" && ScreenPreset.All[7].Value == 7, "G40B preset catalog");
@@ -393,7 +446,9 @@ internal static class Tests
             MainForm main = form as MainForm;
             if (main != null)
             {
-                main.Render(new AppSnapshot { Settings = new AppSettings { Profiles = examples, DarkMode = UiTheme.Dark }, CurrentMode = 1, Connected = true, Status = "Prêt · en attente d’un jeu" }, false);
+                var sample = new DisplayScan { ModelId="SAM727E", Description="Odyssey G40B", DevicePath="example", Connector="DisplayPort", Status="known-g4-readable" };
+                DisplayModes.Resolve(sample, null, 1);
+                main.Render(new AppSnapshot { Displays = new List<DisplayScan> { sample }, Settings = new AppSettings { DisplaySelection = new List<string> { "example" }, Profiles = examples, DarkMode = UiTheme.Dark }, CurrentMode = 1, Connected = true, Status = "Prêt · en attente d’un jeu" }, false);
                 if (kind.StartsWith("profiles") || kind == "discovery")
                 {
                     ProfilesPanel panel = Field<ProfilesPanel>(main, "profiles");
@@ -440,7 +495,7 @@ internal static class Tests
                 foreach (InstalledGame game in games) Console.WriteLine(game.Platform + " | " + game.Name + " | " + game.ProcessName);
                 Console.WriteLine("DETECTED " + games.Count + " games; " + games.Count(game => !string.IsNullOrEmpty(game.ProcessName)) + " executables"); return 0;
             }
-            Offline(); Updates(); Profiles(); DiscoverGames(); Interface(); InlineGames();
+            MultiDisplay(); Offline(); Updates(); Profiles(); DiscoverGames(); Interface(); InlineGames();
             if (Array.IndexOf(args, "--hardware") >= 0) Hardware();
             Console.WriteLine("PASS: " + checks + " checks"); return 0;
         }

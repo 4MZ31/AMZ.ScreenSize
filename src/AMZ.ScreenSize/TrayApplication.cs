@@ -10,7 +10,7 @@ using System.Linq;
 
 namespace AMZ.ScreenSize
 {
-    public sealed class TrayApplication : ApplicationContext, IAppActions
+    public sealed class TrayApplication : ApplicationContext, IAppActions, IDisplayActions
     {
         public const string MutexName = "Local\\AMZ.ScreenSize-v1";
         public const string ShowName = "Local\\AMZ.ScreenSize-v1-Show";
@@ -27,6 +27,9 @@ namespace AMZ.ScreenSize
         private readonly string[] processNames;
         private string profilesMenuSignature;
         private bool visualBusy;
+        private bool discoverRequested;
+        private string topologySignature;
+        private DateTime nextDetection = DateTime.MinValue;
         private readonly Queue<Action> pendingOperations = new Queue<Action>();
         private readonly UpdateManager updater;
         private UpdatePlan pendingUpdate;
@@ -40,7 +43,7 @@ namespace AMZ.ScreenSize
         {
             this.processNames = processNames;
             store = new SettingsStore(directory);
-            controller = new AutomationController(new SamsungMonitor(), store.Load(), store.Save, store.Log);
+            controller = new AutomationController(new SamsungMonitor(), store.Load(), store.Save, store.Log, new MonitorFleet());
             updater = new UpdateManager(directory, store.Log);
             pendingUpdate = updater.ReadReady();
             if (pendingUpdate != null) updateMessage = "Version " + pendingUpdate.Version + " prête";
@@ -73,7 +76,7 @@ namespace AMZ.ScreenSize
             Render();
             store.Log("START version=" + Program.Version + " profiles=" + controller.Snapshot().Settings.Profiles.Count);
             if (!background) ShowWindow();
-            RunOperation(delegate { controller.Tick(RunningProcesses()); controller.Refresh(); }, false);
+            RunOperation(delegate { controller.Discover(); controller.Tick(RunningProcesses()); controller.Refresh(); }, false);
         }
 
         private static Icon MakeIcon(bool active)
@@ -127,8 +130,19 @@ namespace AMZ.ScreenSize
             { installUpdate = true; RequestQuit(); return; }
             if (busy || quitting || DateTime.UtcNow < nextAttempt) return;
             bool refresh = DateTime.UtcNow >= nextRead;
+            bool scan = discoverRequested;
+            discoverRequested = false;
             RunOperation(delegate
             {
+                if (scan || refresh)
+                {
+                    string topology = string.Join("|", VideoTopology.Read().SelectMany(pair => pair.Value.Select(t => pair.Key + t.DevicePath + t.Technology)).OrderBy(v => v));
+                    if (scan || topology != topologySignature || DateTime.UtcNow >= nextDetection)
+                    {
+                        controller.Discover(); topologySignature = topology;
+                        nextDetection = DateTime.UtcNow.AddMinutes(3);
+                    }
+                }
                 controller.Tick(RunningProcesses());
                 if (refresh) { controller.Refresh(); nextRead = DateTime.UtcNow.AddSeconds(15); }
             }, false, true);
@@ -196,7 +210,8 @@ namespace AMZ.ScreenSize
                 enabledMenu.Checked = snapshot.Settings.Enabled;
                 enabledMenu.Enabled = !busy && !quitting;
                 formatsMenu.Enabled = !busy && !quitting && !window.HasUnsavedProfiles;
-                string signature = string.Join("|", snapshot.Settings.Profiles.Select(profile => profile.Id + ":" + profile.Name + ":" + profile.TargetMode + ":" + profile.Enabled));
+                int[] common = MonitorFleet.Common(snapshot.Displays, snapshot.Settings.DisplaySelection);
+                string signature = string.Join(",", common) + string.Join("|", snapshot.Settings.Profiles.Select(profile => profile.Id + ":" + profile.Name + ":" + profile.TargetMode + ":" + profile.Enabled));
                 if (signature != profilesMenuSignature)
                 {
                     foreach (ToolStripItem item in formatsMenu.DropDownItems.Cast<ToolStripItem>().ToArray()) item.Dispose();
@@ -206,7 +221,7 @@ namespace AMZ.ScreenSize
                     {
                         string id = profile.Id;
                         ToolStripMenuItem group = new ToolStripMenuItem(profile.Name + (profile.Enabled ? "" : " · désactivé"));
-                        foreach (ScreenPreset preset in ScreenPreset.All)
+                        foreach (ScreenPreset preset in common.Select(ScreenPreset.Find))
                         {
                             int value = preset.Value;
                             ToolStripMenuItem item = new ToolStripMenuItem(preset.Label) { Checked = value == profile.TargetMode };
@@ -224,6 +239,8 @@ namespace AMZ.ScreenSize
             }
             finally { updatingMenu = false; }
         }
+        public void RequestDiscovery() { discoverRequested = true; }
+        public void SelectDisplays(List<string> paths) { RunOperation(delegate { controller.SelectDisplays(paths); }, false); }
         public void ApplyManual(int value) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.ApplyManual(value); }, false); }
         public void SaveTarget(int value) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.SetTarget(value); }, false); }
         public void SaveProfileTarget(string id, int value) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.SetProfileTarget(id, value); }, false); }

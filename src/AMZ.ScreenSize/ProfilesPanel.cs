@@ -48,7 +48,7 @@ namespace AMZ.ScreenSize
             add = UiTheme.Button("Ajouter un jeu"); add.Symbol = "plus"; add.Dock = DockStyle.Fill; add.Margin = new Padding(0, 0, 0, 4);
             add.Click += delegate
             {
-                GameProfile profile = new GameProfile { Name = "Nouveau jeu", Processes = new string[0] };
+                GameProfile profile = new GameProfile { Name = "Nouveau jeu", TargetMode = creationMode, Processes = new string[0] };
                 draft.Add(profile); search.Text = ""; Changed(); Populate("profile:" + profile.Id); name.Focus(); name.SelectAll();
             };
             toolbar.Controls.Add(add, 3, 0); root.Controls.Add(toolbar, 0, 0);
@@ -149,6 +149,21 @@ namespace AMZ.ScreenSize
             if (previous != null && current != null && current.Profile != null && ReferenceEquals(previous.Profile, current.Profile)) UpdateButtons();
             else ShowSelection();
         }
+        private int FormatId { get { var p = format.SelectedItem as ScreenPreset; return p == null ? -1 : p.Value; } }
+
+        public void SetFormats(int[] values)
+        {
+            loading = true;
+            try
+            {
+                format.Items.Clear();
+                foreach (int id in values) format.Items.Add(ScreenPreset.Find(id));
+                if (!values.Contains(creationMode)) creationMode = values.Contains(7) ? 7 : values.Length == 0 ? -1 : values[0];
+            }
+            finally { loading = false; }
+            ShowSelection();
+        }
+
         private void ShowSelection()
         {
             loading = true;
@@ -158,10 +173,11 @@ namespace AMZ.ScreenSize
                 name.Text = choice == null ? "" : choice.Name;
                 processes.Text = profile != null ? string.Join(" ; ", profile.Processes.Select(p => p.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? p : p + ".exe")) :
                     choice != null && !string.IsNullOrEmpty(choice.Installation.ProcessName) ? choice.Installation.ProcessName + ".exe" : "";
-                format.SelectedIndex = profile != null ? profile.TargetMode : creationMode; enabled.Checked = profile == null || profile.Enabled;
+                format.SelectedIndex = format.Items.IndexOf(ScreenPreset.Find(profile != null ? profile.TargetMode : creationMode) ?? ScreenPreset.All[0]); enabled.Checked = profile == null || profile.Enabled;
                 help.Text = choice == null ? "" : profile != null ? "Plusieurs exécutables ? Séparez-les par « ; ».\nChoisissez le jeu plutôt que son lanceur." :
                     string.IsNullOrEmpty(choice.Installation.ProcessName) ? "Exécutable introuvable : choisissez le fichier .exe du jeu." :
                     choice.Installation.Platform + " · choisissez le format du nouveau profil.\nCochez plusieurs jeux pour les ajouter ensemble.";
+                if (profile != null && format.SelectedIndex < 0) help.Text = "Le format enregistré est indisponible. Choisissez un format commun pour ce jeu.";
                 empty.Visible = choice == null; if (empty.Visible) empty.BringToFront(); else empty.SendToBack();
             }
             finally { loading = false; }
@@ -172,11 +188,12 @@ namespace AMZ.ScreenSize
             if (loading) return; GameChoice choice = Selection;
             if (choice == null || choice.Profile == null)
             {
-                if (ScreenPreset.IsSelectable(format.SelectedIndex)) creationMode = format.SelectedIndex;
+                if (FormatId >= 0) creationMode = FormatId;
                 UpdateButtons(); return;
             }
             choice.Profile.Name = name.Text; choice.Profile.Processes = processes.Text.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries);
-            choice.Profile.TargetMode = format.SelectedIndex; choice.Profile.Enabled = enabled.Checked;
+            if (FormatId >= 0) choice.Profile.TargetMode = FormatId;
+            choice.Profile.Enabled = enabled.Checked;
             list.SelectedItems[0].Text = name.Text; Changed();
         }
         private void Changed() { Dirty = true; savedSignature = null; message.Text = "Modifications non enregistrées"; message.ForeColor = UiTheme.Accent; list.Invalidate(); UpdateButtons(); }
@@ -191,7 +208,7 @@ namespace AMZ.ScreenSize
         {
             try
             {
-                List<GameProfile> additions = GameCatalog.Create(PendingChoices(), creationMode);
+                List<GameProfile> additions = creationMode >= 0 ? GameCatalog.Create(PendingChoices(), creationMode) : new List<GameProfile>();
                 if (additions.Count > 0)
                 {
                     draft.AddRange(additions); Dirty = true; chosen.Clear(); Populate("profile:" + additions[0].Id);
@@ -207,8 +224,8 @@ namespace AMZ.ScreenSize
             name.Enabled = processes.Enabled = exists && !working; name.ReadOnly = processes.ReadOnly = !configured;
             format.Enabled = enabled.Enabled = browse.Enabled = exists && !working; enabled.Visible = configured;
             remove.Enabled = configured && !working;
-            add.Enabled = search.Enabled = list.Enabled = !working; refresh.Enabled = !working && !scanning;
-            int count = PendingChoices().Count(c => !string.IsNullOrEmpty(c.Installation.ProcessName));
+            add.Enabled = !working && creationMode >= 0; search.Enabled = list.Enabled = !working; refresh.Enabled = !working && !scanning;
+            int count = creationMode < 0 ? 0 : PendingChoices().Count(c => !string.IsNullOrEmpty(c.Installation.ProcessName));
             save.Text = count > 0 ? count == 1 ? "Créer le profil" : "Créer " + count + " profils" : "Enregistrer";
             save.Enabled = !working && (Dirty || count > 0); cancel.Enabled = !working && (Dirty || chosen.Count > 0);
         }
