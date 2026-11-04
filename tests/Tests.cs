@@ -4,6 +4,9 @@ using System.IO;
 using System.Drawing;
 using System.Windows.Forms;
 using System.Reflection;
+using System.Linq;
+using System.Runtime.Serialization.Json;
+using System.Threading.Tasks;
 using AMZ.ScreenSize;
 
 internal static class Tests
@@ -28,6 +31,8 @@ internal static class Tests
         public bool StartupEnabled { get { return true; } }
         public void ApplyManual(int value) { }
         public void SaveTarget(int value) { }
+        public void SaveProfileTarget(string id, int value) { }
+        public void EditProfiles() { }
         public void SetEnabled(bool value) { }
         public void RefreshMonitor() { }
         public void SetStartup(bool value) { }
@@ -116,6 +121,112 @@ internal static class Tests
         }
         finally { monitor.SetMode(original); Console.WriteLine("HARDWARE restored=" + monitor.ReadMode()); }
     }
+    private static GameProfile Profile(string id, int mode)
+    { return new GameProfile { Id = id, Name = "Game " + id, Processes = new[] { id + ".exe" }, TargetMode = mode }; }
+    private static void Profiles()
+    {
+        AppSettings legacy = new AppSettings { TargetMode = 4, Enabled = false, AutoUpdate = false, RestorePending = true, OriginalMode = 0 };
+        legacy.Validate();
+        Assert(legacy.Profiles.Count == 1 && legacy.Profiles[0].TargetMode == 4 && legacy.Profiles[0].Processes.Contains("cs2") && !legacy.Enabled && !legacy.AutoUpdate && legacy.RestorePending && legacy.OriginalMode == 0, "1.0 settings migrate Counter-Strike without losing recovery state");
+        AppSettings copy = legacy.Copy(); copy.Profiles[0].Processes[0] = "changed";
+        Assert(legacy.Profiles[0].Processes[0] == "cs2", "profile arrays are deeply copied");
+        GameProfile alpha = Profile("alpha", 2), beta = Profile("beta", 5);
+        FakeMonitor monitor = new FakeMonitor(); MemoryStore store = new MemoryStore();
+        AutomationController app = Make(monitor, store, new AppSettings { Profiles = new List<GameProfile> { alpha, beta } });
+        app.Tick(new[] { "ALPHA" });
+        Assert(monitor.Mode == 2 && app.Snapshot().ActiveProfileId == "alpha", "first custom game applies its own format case-insensitively");
+        app.Tick(new[] { "beta", "alpha" });
+        Assert(monitor.Mode == 2 && app.Snapshot().ActiveProfileId == "alpha", "second game cannot steal priority");
+        app.Tick(new[] { "beta" });
+        Assert(monitor.Mode == 5 && app.Snapshot().Settings.OriginalMode == 1 && app.Snapshot().Settings.RestorePending, "handoff uses second game's format without replacing original baseline");
+        app.Tick(new string[0]); Assert(monitor.Mode == 1 && !app.Snapshot().Settings.RestorePending, "last game exit restores initial format");
+        app.Tick(new[] { "beta", "alpha" }); Assert(app.Snapshot().ActiveProfileId == "alpha", "simultaneous startup uses profile order deterministically");
+        app.Close(); app.Tick(new[] { "beta" }); app.Tick(new[] { "alpha", "beta" });
+        Assert(app.Snapshot().ActiveProfileId == "beta" && monitor.Mode == 5, "earlier detected game stays active independent of profile order");
+        GameProfile disabledBeta = beta.Copy(); disabledBeta.Enabled = false;
+        app.SetProfiles(new[] { alpha, disabledBeta });
+        Assert(monitor.Mode == 2 && app.Snapshot().ActiveProfileId == "alpha", "disabling active profile hands control to another running game");
+        app.SetProfiles(new[] { disabledBeta }); Assert(monitor.Mode == 1 && !app.Snapshot().Settings.RestorePending, "removing last active profile restores initial mode");
+        app.SetProfiles(new GameProfile[0]); Assert(app.Snapshot().Settings.Profiles.Count == 0 && !app.Snapshot().GameRunning, "empty profile list does not recreate Counter-Strike");
+        GameProfile duplicate = Profile("other", 3); duplicate.Processes = new[] { " ALPHA.EXE " };
+        Throws(delegate { app.SetProfiles(new[] { alpha, duplicate }); }, "ambiguous process assignment rejected");
+        Assert(app.Snapshot().Settings.Profiles.Count == 0, "invalid profile edits preserve existing settings");
+        GameProfile invalid = Profile("bad", 7); invalid.Processes = new[] { "C:\\Games\\bad.exe" };
+        Throws(delegate { app.SetProfiles(new[] { invalid }); }, "process fields cannot contain a file path");
+        app.SetProfiles(new[] { alpha, beta }); app.Tick(new[] { "alpha" });
+        GameProfile renamed = alpha.Copy(); renamed.Name = "Renamed game"; renamed.TargetMode = 6;
+        app.SetProfiles(new[] { renamed, beta }); Assert(monitor.Mode == 6 && app.Snapshot().ActiveProfileName == "Renamed game" && app.Snapshot().Settings.OriginalMode == 1, "editing active game preserves baseline and applies changed format");
+        store.Fail = true;
+        Throws(delegate { app.SetProfiles(new[] { beta }); }, "failed profile save does not change live profile set");
+        Assert(app.Snapshot().Settings.Profiles.Count == 2 && monitor.Mode == 6, "profile persistence failure retains current format and profiles");
+        store.Fail = false; monitor.FailSet = true;
+        Throws(delegate { app.Tick(new[] { "beta" }); }, "failed game handoff preserves recovery record");
+        monitor.FailSet = false; app.Tick(new[] { "beta" }); app.Close();
+        Assert(monitor.Mode == 1 && !app.Snapshot().Settings.RestorePending, "handoff retry and final restore succeed");
+        app.Tick(new[] { "gamma" }); app.SetProfiles(new[] { Profile("gamma", 3) });
+        Assert(monitor.Mode == 3, "adding a profile for an already running game takes effect immediately");
+        AutomationController recovered = Make(monitor, store, app.Snapshot().Settings); recovered.Tick(new string[0]);
+        Assert(monitor.Mode == 1, "multi-game crash recovery restores saved initial mode");
+        GameProfile aliases = Profile("aliases", 4); aliases.Processes = new[] { "one.exe", "two.EXE", "ONE" };
+        app = Make(monitor, store, new AppSettings { Profiles = new List<GameProfile> { aliases } });
+        app.Tick(new[] { "one", "two" }); app.Tick(new[] { "two" });
+        Assert(monitor.Mode == 4 && app.Snapshot().GameRunning && app.Snapshot().Settings.Profiles[0].Processes.Length == 2, "process aliases remain active until their last process closes");
+        app.Close();
+    }
+    private static void WriteFixture(string path, string content)
+    { Directory.CreateDirectory(Path.GetDirectoryName(path)); File.WriteAllText(path, content); }
+    private static void DiscoverGames()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "AMZ.ScreenSize.discovery." + Guid.NewGuid().ToString("N"));
+        string steam = Path.Combine(root, "Steam"), library = Path.Combine(root, "OtherLibrary"), epic = Path.Combine(root, "EpicManifests"), xbox = Path.Combine(root, "XboxGames");
+        string alpha = Path.Combine(steam, "steamapps", "common", "Alpha"), beta = Path.Combine(library, "steamapps", "common", "Beta"), epicGame = Path.Combine(root, "EpicGame");
+        try
+        {
+            WriteFixture(Path.Combine(alpha, "alpha.exe"), "fixture");
+            WriteFixture(Path.Combine(beta, "beta.exe"), "fixture");
+            WriteFixture(Path.Combine(steam, "steamapps", "libraryfolders.vdf"), "// fixture\n\"libraryfolders\" { \"0\" { \"path\" \"" + steam.Replace("\\", "\\\\") + "\" } \"1\" \"" + library.Replace("\\", "\\\\") + "\" }");
+            WriteFixture(Path.Combine(steam, "steamapps", "appmanifest_1.acf"), "\"AppState\" { \"name\" \"Étoile Alpha\" \"installdir\" \"Alpha\" }");
+            WriteFixture(Path.Combine(library, "steamapps", "appmanifest_2.acf"), "\"AppState\" { \"name\" \"Beta\" \"installdir\" \"Beta\" }");
+            WriteFixture(Path.Combine(steam, "steamapps", "appmanifest_3.acf"), "\"AppState\" { \"name\" \"Missing game\" \"installdir\" \"Absent\" }");
+            WriteFixture(Path.Combine(steam, "steamapps", "appmanifest_4.acf"), "\"AppState\" { \"name\" \"Traversal\" \"installdir\" \"..\\..\\..\\EpicGame\" }");
+            WriteFixture(Path.Combine(epicGame, "Bootstrapper.exe"), "fixture");
+            string shipping = Path.Combine(epicGame, "Game", "Binaries", "Win64", "Epic-Win64-Shipping.exe"); WriteFixture(shipping, "fixture");
+            Directory.CreateDirectory(epic);
+            EpicManifest epicManifest = new EpicManifest { DisplayName = "Epic Fixture", InstallLocation = epicGame, LaunchExecutable = "Bootstrapper.exe" };
+            using (FileStream stream = File.Create(Path.Combine(epic, "fixture.item"))) new DataContractJsonSerializer(typeof(EpicManifest)).WriteObject(stream, epicManifest);
+            epicManifest.DisplayName = "Duplicate Alpha"; epicManifest.InstallLocation = alpha;
+            using (FileStream stream = File.Create(Path.Combine(epic, "duplicate.item"))) new DataContractJsonSerializer(typeof(EpicManifest)).WriteObject(stream, epicManifest);
+            WriteFixture(Path.Combine(epic, "broken.item"), "not-json");
+            string xboxContent = Path.Combine(xbox, "XboxFixture", "Content");
+            WriteFixture(Path.Combine(xboxContent, "xboxgame.exe"), "fixture");
+            WriteFixture(Path.Combine(xboxContent, "MicrosoftGame.config"), "<Game><ShellVisuals DefaultDisplayName=\"Xbox Fixture\"/><ExecutableList><Executable Name=\"xboxgame.exe\"/></ExecutableList></Game>");
+            DiscoveryOptions options = new DiscoveryOptions { IncludeRegistry = false }; options.SteamRoots.Add(steam); options.EpicManifestDirectories.Add(epic); options.XboxRoots.Add(xbox);
+            List<InstalledGame> games = GameDiscovery.Discover(options);
+            Assert(games.Count == 4, "discovery reads Steam, legacy secondary library, Epic and Xbox without duplicates");
+            Assert(games.Any(game => game.Name == "Étoile Alpha" && game.ProcessName == "alpha"), "Steam Unicode metadata and executable resolution");
+            Assert(games.Any(game => game.Name == "Beta" && game.Platform == "Steam"), "Steam secondary library discovery");
+            Assert(games.Any(game => game.Name == "Epic Fixture" && game.Executable == shipping), "Epic real shipping process preferred over bootstrapper");
+            Assert(games.Any(game => game.Name == "Xbox Fixture" && game.ProcessName == "xboxgame"), "Xbox MicrosoftGame.config detection");
+            Assert(!games.Any(game => game.Name == "Traversal" || game.Name == "Missing game"), "missing installs and Steam path traversal ignored");
+            Assert(GameDiscovery.FindExecutable(alpha, "Alpha", Path.Combine(root, "outside.exe")) == Path.Combine(alpha, "alpha.exe"), "executable hints cannot escape install directory");
+            WriteFixture(Path.Combine(alpha, "icon.ico"), "fixture");
+            Assert(GameDiscovery.FindExecutable(alpha, "Alpha", "icon.ico") == Path.Combine(alpha, "alpha.exe"), "registry icon hints cannot be mistaken for game executables");
+            WriteFixture(Path.Combine(alpha, "bpreport.exe"), "fixture");
+            Assert(GameDiscovery.FindExecutable(alpha, "Unrelated title", null) == Path.Combine(alpha, "alpha.exe"), "crash reporting utilities excluded");
+            string counter = Path.Combine(root, "CounterStrike");
+            WriteFixture(Path.Combine(counter, "csgo.exe"), "fixture"); WriteFixture(Path.Combine(counter, "game", "bin", "win64", "cs2.exe"), "fixture");
+            Assert(GameDiscovery.FindExecutable(counter, "Counter-Strike 2", null).EndsWith("cs2.exe"), "current Counter-Strike executable preferred over leftover CS GO");
+            string leftover = Path.Combine(steam, "steamapps", "common", "Leftover"); Directory.CreateDirectory(Path.Combine(leftover, "SaveData"));
+            WriteFixture(Path.Combine(steam, "steamapps", "appmanifest_5.acf"), "\"AppState\" { \"name\" \"Uninstalled leftover\" \"installdir\" \"Leftover\" }");
+            Assert(!GameDiscovery.Discover(options).Any(game => game.Name == "Uninstalled leftover"), "uninstalled game save folders ignored");
+            Throws(delegate { ValveKeyValues.Parse("\"unclosed"); }, "invalid Steam manifest rejected");
+        }
+        finally
+        {
+            string full = Path.GetFullPath(root), temp = Path.GetFullPath(Path.GetTempPath());
+            if (full.StartsWith(temp, StringComparison.OrdinalIgnoreCase) && Path.GetFileName(full).StartsWith("AMZ.ScreenSize.discovery.", StringComparison.Ordinal)) Directory.Delete(full, true);
+        }
+    }
     private static void Updates()
     {
         Assert(UpdateManager.ParseVersion("v1.2.3").ToString(3) == "1.2.3", "stable update version parsing");
@@ -135,13 +246,22 @@ internal static class Tests
         Assert(!store.Persisted.AutoUpdate && monitor.Writes == 0, "automatic update preference persists without monitor changes");
         Assert(UpdateManager.QuoteArgument("C:\\Screens With Spaces\\") == "\"C:\\Screens With Spaces\\\\\"", "updater paths with spaces and trailing slash quoted correctly");
     }
-    private static void Screenshot(string path)
+    private static void Screenshot(string path, string kind)
     {
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
-        using (MainForm form = new MainForm(new PreviewActions(), SystemIcons.Application))
+        List<GameProfile> examples = new List<GameProfile> { GameProfile.CounterStrike(7), new GameProfile { Name = "Jeu d’exemple", Processes = new[] { "example" }, TargetMode = 2 } };
+        Task<List<InstalledGame>> games = Task.FromResult(new List<InstalledGame> {
+            new InstalledGame { Name = "Jeu d’exemple", Platform = "Steam", InstallDirectory = "C:\\Games\\Example", Executable = "C:\\Games\\Example\\example.exe" },
+            new InstalledGame { Name = "Autre jeu", Platform = "Epic Games", InstallDirectory = "C:\\Games\\Other", Executable = "C:\\Games\\Other\\other.exe" }
+        });
+        Form selectedForm = kind == "profiles" ? (Form)new ProfilesForm(examples, SystemIcons.Application, games) :
+            kind == "discovery" ? (Form)new GameDiscoveryForm(new GameProfile[0], 7, SystemIcons.Application, games) : new MainForm(new PreviewActions(), SystemIcons.Application);
+        using (Form form = selectedForm)
         {
-            form.Render(new AppSnapshot { Settings = new AppSettings(), CurrentMode = 1, Connected = true, Status = "Prêt · en attente de Counter-Strike" }, false);
+            MainForm main = form as MainForm;
+            if (main != null) main.Render(new AppSnapshot { Settings = new AppSettings(), CurrentMode = 1, Connected = true, Status = "Prêt · en attente d’un jeu" }, false);
             form.Show(); Application.DoEvents();
+            for (int frame = 0; frame < 20; frame++) { System.Threading.Thread.Sleep(10); Application.DoEvents(); }
             using (Bitmap bitmap = new Bitmap(form.ClientSize.Width, form.ClientSize.Height))
             {
                 using (Bitmap whole = new Bitmap(form.Width, form.Height))
@@ -161,8 +281,16 @@ internal static class Tests
     {
         try
         {
-            if (args.Length == 2 && args[0] == "--screenshot") { Screenshot(args[1]); return 0; }
-            Offline(); Updates();
+            if (args.Length == 2 && args[0] == "--screenshot") { Screenshot(args[1], "main"); return 0; }
+            if (args.Length == 2 && args[0] == "--profiles-screenshot") { Screenshot(args[1], "profiles"); return 0; }
+            if (args.Length == 2 && args[0] == "--discovery-screenshot") { Screenshot(args[1], "discovery"); return 0; }
+            if (args.Length == 1 && args[0] == "--discover")
+            {
+                List<InstalledGame> games = GameDiscovery.Discover(GameDiscovery.SystemOptions());
+                foreach (InstalledGame game in games) Console.WriteLine(game.Platform + " | " + game.Name + " | " + game.ProcessName);
+                Console.WriteLine("DETECTED " + games.Count + " games; " + games.Count(game => !string.IsNullOrEmpty(game.ProcessName)) + " executables"); return 0;
+            }
+            Offline(); Updates(); Profiles(); DiscoverGames();
             if (Array.IndexOf(args, "--hardware") >= 0) Hardware();
             Console.WriteLine("PASS: " + checks + " checks"); return 0;
         }

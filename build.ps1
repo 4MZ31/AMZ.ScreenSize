@@ -11,7 +11,7 @@ $intermediate = Join-Path $root 'obj'
 [IO.Directory]::CreateDirectory($output) | Out-Null
 [IO.Directory]::CreateDirectory($intermediate) | Out-Null
 $versionSource = Join-Path $intermediate 'Version.g.cs'
-$attributes = 'using System.Reflection; [assembly: AssemblyTitle("AMZ.ScreenSize")] [assembly: AssemblyProduct("AMZ.ScreenSize")] [assembly: AssemblyCompany("4MZ31")] [assembly: AssemblyDescription("Samsung Odyssey screen-size presets and Counter-Strike automation")] [assembly: AssemblyVersion("' + $version + '.0")] [assembly: AssemblyFileVersion("' + $version + '.0")]', ''
+$attributes = 'using System.Reflection; [assembly: AssemblyTitle("AMZ.ScreenSize")] [assembly: AssemblyProduct("AMZ.ScreenSize")] [assembly: AssemblyCompany("4MZ31")] [assembly: AssemblyDescription("Samsung Odyssey screen-size presets and per-game profiles")] [assembly: AssemblyVersion("' + $version + '.0")] [assembly: AssemblyFileVersion("' + $version + '.0")]', ''
 [IO.File]::WriteAllLines($versionSource, $attributes, (New-Object Text.UTF8Encoding $false))
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $root 'src\AMZ.ScreenSize') -Filter '*.cs' | Select-Object -ExpandProperty FullName)
 $exe = Join-Path $output 'AMZ.ScreenSize.exe'

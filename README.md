@@ -1,10 +1,10 @@
 # AMZ.ScreenSize
 
-Choisir la taille d’image de son **Samsung Odyssey G4** depuis Windows et appliquer automatiquement son format préféré au lancement de **Counter-Strike**.
+Choisir la taille d’image de son **Samsung Odyssey G4** depuis Windows et appliquer automatiquement un format différent pour chaque jeu.
 
 Une application Windows portable, avec une interface en français et une icône dans la zone de notification.
 
-![Interface AMZ.ScreenSize : formats prédéfinis, aperçu et profil Counter-Strike](docs/interface.png)
+![Interface AMZ.ScreenSize : formats prédéfinis, aperçu et profils de jeux](docs/interface.png)
 
 ## Télécharger
 
@@ -18,8 +18,8 @@ L’exécutable est autonome : aucun script PowerShell ni fichier source n’est
 
 1. Ouvrir `AMZ.ScreenSize.exe`.
 2. Choisir un format dans la liste de gauche ; l’aperçu montre la zone d’image attendue.
-3. Cliquer sur **Appliquer maintenant** pour l’utiliser immédiatement, ou sur **Utiliser pour CS** pour l’enregistrer comme profil Counter-Strike.
-4. Cocher **Changer le format au lancement du jeu** pour activer l’automatisme.
+3. Cliquer sur **Appliquer maintenant** pour l’utiliser immédiatement, ou choisir un jeu dans la liste **Profils de jeux** et cliquer sur **Utiliser pour le profil**.
+4. Cocher **Activer les profils automatiques** pour appliquer les profils au lancement des jeux.
 
 Les huit préréglages du G4 sont disponibles :
 
@@ -34,11 +34,43 @@ Les huit préréglages du G4 sont disponibles :
 
 Il s’agit des réglages **Taille de l’écran / Screen Size** du moniteur. L’application ne change pas la définition Windows, par exemple 1920 × 1080, ni la résolution choisie dans le jeu. L’aperçu est indicatif : le signal vidéo et les options du moniteur influencent le rendu.
 
-### Counter-Strike et restauration
+### Créer des profils par jeu
 
-L’application détecte `cs2.exe` et `csgo.exe` toutes les deux secondes. Elle mémorise le format courant **avant** d’appliquer le profil enregistré.
+Ouvrir **Gérer / détecter…**. Chaque profil possède un nom, un ou plusieurs processus, un format et une case d’activation indépendante.
 
-Le format précédent est restauré à la fermeture du jeu, à la désactivation de l’automatisme et avec **Quitter et restaurer l’écran**. Modifier le profil pendant une partie applique le nouveau format tout en conservant le format d’origine à restaurer.
+![Gestion des profils de jeux](docs/profiles.png)
+
+Cliquer sur **Ajouter un jeu**, saisir son nom et choisir son `.exe`, ou indiquer les noms de processus séparés par `;` ou une virgule. Par exemple `game.exe ; game-win64.exe`. Choisir le format souhaité puis **Enregistrer les profils**. Les profils peuvent être modifiés, désactivés ou supprimés dans cette fenêtre.
+
+Le processus choisi doit être celui du jeu qui reste ouvert pendant la partie, pas celui du lanceur Steam ou Epic. La comparaison ignore la casse et accepte les noms avec ou sans `.exe`. Un même processus ne peut pas appartenir à plusieurs profils : les jeux partageant exactement le même nom d’exécutable doivent utiliser un profil commun ou être configurés manuellement.
+
+Les préférences de la version 1.0 sont reprises automatiquement dans un profil **Counter-Strike** pour `cs2.exe` et `csgo.exe`, avec le format précédemment enregistré. La liste accepte jusqu’à 64 profils et 16 noms de processus par profil.
+
+### Détecter les jeux installés
+
+La recherche démarre automatiquement à l’ouverture de la gestion des profils. Le bouton **Jeux installés…** ouvre la liste ; **Actualiser** relance la détection.
+
+![Détection et sélection des jeux installés, données d’exemple](docs/discovery.png)
+
+Cocher les jeux souhaités, choisir le format initial de leurs profils, puis cliquer sur **Créer les profils sélectionnés**. Chaque format pourra ensuite être ajusté séparément. Les jeux déjà associés à un profil sont signalés pour éviter les doublons. Aucun profil n’est créé ou activé sans cette sélection et l’enregistrement des profils.
+
+La détection lit les sources locales suivantes, sans connexion aux comptes des lanceurs et sans parcours complet des disques :
+
+- **Steam** : manifestes des jeux et bibliothèques secondaires, y compris sur d’autres disques.
+- **Epic Games** : manifestes des installations du lanceur.
+- **GOG** : informations d’installation du registre Windows.
+- **Xbox / Microsoft Store** : installations accessibles dans les dossiers `XboxGames` et leurs fichiers `MicrosoftGame.config`.
+- Certaines autres installations déclarées dans Windows par des éditeurs de jeux connus.
+
+L’exécutable est proposé à partir du manifeste et d’une recherche limitée au dossier du jeu. Les outils de désinstallation, de mise à jour, de rapport de plantage et les anti-triches sont filtrés. Cette identification reste indicative : si l’exécutable est absent ou incorrect, sélectionner le jeu et utiliser **Choisir un .exe…**, ou créer le profil manuellement. Les jeux protégés ou les installations non déclarées peuvent ne pas être détectés. La liste des jeux reste sur le PC ; elle n’est pas envoyée à GitHub.
+
+### Détection des processus et restauration
+
+L’application vérifie les processus toutes les deux secondes. Elle mémorise le format courant **avant** d’appliquer le premier profil actif.
+
+Si un seul jeu est ouvert, son format précédent revient à sa fermeture. Si plusieurs jeux sont ouverts, le premier détecté garde la priorité. Quand il se ferme, le jeu encore ouvert suivant reçoit son propre format ; le format d’origine revient après le dernier jeu géré. Si plusieurs jeux sont déjà ouverts au lancement de l’application, l’ordre des profils les départage.
+
+Désactiver l’automatisme ou utiliser **Quitter et restaurer l’écran** restaure aussi le format d’origine. Modifier le format d’un profil actif l’applique immédiatement, sans remplacer le format d’origine à restaurer. Désactiver ou supprimer le profil actif passe au jeu suivant ou restaure le format d’origine s’il n’en reste aucun.
 
 Pendant une partie gérée automatiquement, l’application manuelle est désactivée. Désactiver l’automatisme permet de reprendre le contrôle manuel.
 
@@ -49,7 +81,7 @@ Les informations de restauration sont sauvegardées sur disque avant tout change
 Fermer ou réduire la fenêtre conserve l’application en arrière-plan. Utiliser l’icône d’écran dans la zone de notification, accessible via la flèche **^** si elle est masquée :
 
 - **Double-clic :** rouvrir l’interface.
-- **Clic droit :** activer/désactiver l’automatisme, choisir le profil Counter-Strike ou quitter proprement.
+- **Clic droit :** activer/désactiver l’automatisme, gérer les profils, changer leurs formats ou quitter proprement.
 - **Icône verte :** automatisme actif ; **icône grise :** désactivé.
 
 Cocher **Lancer avec Windows** pour démarrer en arrière-plan avec la session. Conserver l’exécutable à son emplacement après avoir activé cette option ; la décocher puis la recocher actualise le chemin si le fichier a été déplacé.
@@ -60,7 +92,7 @@ L’option **Mises à jour automatiques** est activée par défaut et peut être
 
 Lorsqu’une version plus récente existe, l’application télécharge l’EXE et son fichier `SHA256SUMS.txt` en HTTPS depuis les releases de `4MZ31/AMZ.ScreenSize`. Elle vérifie l’empreinte SHA-256, le nom de l’assembly et sa version avant toute installation. Les préversions, les versions anciennes et les fichiers dont la vérification échoue sont refusés.
 
-L’installation automatique attend que Counter-Strike soit fermé et que le format d’origine ait été restauré. Un assistant local remplace alors l’EXE et relance l’application, avec les mêmes préférences et le même état de fenêtre. Si l’automatisme est désactivé, une mise à jour téléchargée peut être installée avec **Installer la mise à jour**.
+L’installation automatique attend que les jeux des profils soient fermés, que le format d’origine ait été restauré et que la gestion des profils ne soit pas ouverte. Un assistant local remplace alors l’EXE et relance l’application, avec les mêmes préférences et le même état de fenêtre. Si les mises à jour automatiques sont désactivées, une mise à jour téléchargée peut être installée avec **Installer la mise à jour**.
 
 L’ancien EXE est conservé à côté du nouveau sous le nom `AMZ.ScreenSize.exe.previous`. Un remplacement qui échoue conserve l’exécutable en place et n’est pas retenté automatiquement pendant une heure, pour éviter une boucle de redémarrages. Le journal indique le résultat. Le dossier de l’exécutable doit être accessible en écriture sans élévation ; un dossier utilisateur convient.
 
@@ -109,7 +141,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test -Packa
 - Tests : `bin\Release\AMZ.ScreenSize.Tests.exe`.
 - Fichiers distribuables : `dist\`.
 
-Les **44 assertions hors matériel** comprennent 40 vérifications de logique, de persistance et de validation des mises à jour, ainsi que quatre tests isolés du remplacement réel d’un EXE, de sa sauvegarde, de son redémarrage et du rejet d’un fichier invalide. Les workflows GitHub exécutent ces tests sans écran physique et sans modifier une installation utilisateur.
+Les **78 assertions hors matériel** comprennent 74 vérifications de logique, de persistance, de profils, de détection d’installations et de validation des mises à jour, ainsi que quatre tests isolés du remplacement réel d’un EXE, de sa sauvegarde, de son redémarrage et du rejet d’un fichier invalide. La détection est testée avec des bibliothèques Steam multiples, des manifestes Epic, une installation Xbox et des entrées invalides. Les workflows GitHub exécutent ces tests sans écran physique et sans modifier une installation utilisateur.
 
 Pour lancer volontairement le test matériel sur un G4 compatible, hors partie :
 
@@ -119,6 +151,12 @@ Pour lancer volontairement le test matériel sur un G4 compatible, hors partie :
 ```
 
 Ce test ajoute **huit assertions** de relecture, une par préréglage. Ne pas le lancer en même temps qu’un autre utilitaire de contrôle du moniteur.
+
+Un test matériel supplémentaire vérifie deux processus de jeux temporaires, la priorité du premier, le passage au format du second puis la restauration. Quitter d’abord toute instance de l’application :
+
+```powershell
+.\tests\Test-HardwareProfiles.ps1 -Executable .\bin\Release\AMZ.ScreenSize.exe -ScratchDirectory .\TestResults
+```
 
 ### Organisation des sources
 

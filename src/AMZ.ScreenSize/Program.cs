@@ -64,8 +64,8 @@ namespace AMZ.ScreenSize
                             new SettingsStore(directory).Log("UI_ERROR " + eventArgs.Exception.ToString());
                             MessageBox.Show(eventArgs.Exception.Message, "AMZ.ScreenSize", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         };
-                        string processes = Argument(args, "--processes") ?? "cs2,csgo";
-                        string[] names = processes.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                        string processes = Argument(args, "--processes");
+                        string[] names = processes == null ? null : processes.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
                         using (TrayApplication app = new TrayApplication(directory, Array.IndexOf(args, "--background") >= 0, names)) Application.Run(app);
                     }
                     finally { mutex.ReleaseMutex(); }

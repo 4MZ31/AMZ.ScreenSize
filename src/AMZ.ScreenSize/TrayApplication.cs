@@ -5,6 +5,8 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace AMZ.ScreenSize
 {
@@ -23,6 +25,8 @@ namespace AMZ.ScreenSize
         private readonly EventWaitHandle showEvent, quitEvent;
         private readonly Icon activeIcon, inactiveIcon;
         private readonly string[] processNames;
+        private string profilesMenuSignature;
+        private bool profilesEditorOpen;
         private readonly UpdateManager updater;
         private UpdatePlan pendingUpdate;
         private bool checkingUpdates, installUpdate, manualInstallRequested;
@@ -47,17 +51,10 @@ namespace AMZ.ScreenSize
             menu.Items.Add("Ouvrir AMZ.ScreenSize", null, delegate { ShowWindow(); });
             statusMenu = new ToolStripMenuItem("Connexion…") { Enabled = false }; menu.Items.Add(statusMenu);
             menu.Items.Add(new ToolStripSeparator());
-            enabledMenu = new ToolStripMenuItem("Activer pour Counter-Strike") { CheckOnClick = true };
+            enabledMenu = new ToolStripMenuItem("Activer les profils de jeux") { CheckOnClick = true };
             enabledMenu.CheckedChanged += delegate { if (!updatingMenu) SetEnabled(enabledMenu.Checked); };
             menu.Items.Add(enabledMenu);
-            formatsMenu = new ToolStripMenuItem("Format pour Counter-Strike");
-            foreach (ScreenPreset preset in ScreenPreset.All)
-            {
-                int value = preset.Value;
-                ToolStripMenuItem item = new ToolStripMenuItem(preset.Label) { Tag = value };
-                item.Click += delegate { SaveTarget(value); };
-                formatsMenu.DropDownItems.Add(item);
-            }
+            formatsMenu = new ToolStripMenuItem("Profils de jeux");
             menu.Items.Add(formatsMenu);
             menu.Items.Add("Vérifier les mises à jour", null, delegate { CheckForUpdates(); });
             menu.Items.Add(new ToolStripSeparator());
@@ -72,9 +69,9 @@ namespace AMZ.ScreenSize
             timer.Tick += TimerTick;
             timer.Start();
             Render();
-            store.Log("START version=" + Program.Version + " processes=" + string.Join(",", processNames));
+            store.Log("START version=" + Program.Version + " profiles=" + controller.Snapshot().Settings.Profiles.Count);
             if (!background) ShowWindow();
-            RunOperation(delegate { controller.Tick(GameRunning()); controller.Refresh(); }, false);
+            RunOperation(delegate { controller.Tick(RunningProcesses()); controller.Refresh(); }, false);
         }
 
         private static Icon MakeIcon(bool active)
@@ -97,15 +94,24 @@ namespace AMZ.ScreenSize
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool DestroyIcon(IntPtr icon);
 
+        private string[] RunningProcesses()
+        {
+            HashSet<string> names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (Process process in Process.GetProcesses())
+            {
+                try { names.Add(process.ProcessName); }
+                catch (InvalidOperationException) { }
+                catch (System.ComponentModel.Win32Exception) { }
+                finally { process.Dispose(); }
+            }
+            // Preserve the optional 1.0 testing override without changing stored profiles.
+            if (processNames != null && processNames.Any(names.Contains)) { names.Add("cs2"); names.Add("csgo"); }
+            return names.ToArray();
+        }
         private bool GameRunning()
         {
-            bool running = false;
-            foreach (string name in processNames)
-            {
-                Process[] processes = Process.GetProcessesByName(name);
-                foreach (Process process in processes) { running = true; process.Dispose(); }
-            }
-            return running;
+            HashSet<string> running = new HashSet<string>(RunningProcesses(), StringComparer.OrdinalIgnoreCase);
+            return controller.Snapshot().Settings.Profiles.Any(profile => profile.Processes.Any(running.Contains));
         }
         private void TimerTick(object sender, EventArgs args)
         {
@@ -115,13 +121,13 @@ namespace AMZ.ScreenSize
             if (!quitting && !checkingUpdates && snapshot.Settings.AutoUpdate && DateTime.UtcNow >= nextAutoCheck && updater.CheckDue)
                 CheckForUpdates();
             if (pendingUpdate != null && !quitting && DateTime.UtcNow >= nextInstallAttempt && (manualInstallRequested || updater.InstallRetryDue) &&
-                UpdateManager.CanAutoApply(snapshot.Settings.AutoUpdate || manualInstallRequested, GameRunning(), snapshot.Settings.RestorePending, busy))
+                UpdateManager.CanAutoApply(snapshot.Settings.AutoUpdate || manualInstallRequested, GameRunning(), snapshot.Settings.RestorePending, busy || profilesEditorOpen))
             { installUpdate = true; RequestQuit(); return; }
             if (busy || quitting || DateTime.UtcNow < nextAttempt) return;
             bool refresh = DateTime.UtcNow >= nextRead;
             RunOperation(delegate
             {
-                controller.Tick(GameRunning());
+                controller.Tick(RunningProcesses());
                 if (refresh) { controller.Refresh(); nextRead = DateTime.UtcNow.AddSeconds(15); }
             }, false);
         }
@@ -182,16 +188,52 @@ namespace AMZ.ScreenSize
                 enabledMenu.Checked = snapshot.Settings.Enabled;
                 enabledMenu.Enabled = !busy && !quitting;
                 formatsMenu.Enabled = !busy && !quitting;
-                foreach (ToolStripMenuItem item in formatsMenu.DropDownItems)
-                    item.Checked = (int)item.Tag == snapshot.Settings.TargetMode;
+                string signature = string.Join("|", snapshot.Settings.Profiles.Select(profile => profile.Id + ":" + profile.Name + ":" + profile.TargetMode + ":" + profile.Enabled));
+                if (signature != profilesMenuSignature)
+                {
+                    foreach (ToolStripItem item in formatsMenu.DropDownItems.Cast<ToolStripItem>().ToArray()) item.Dispose();
+                    formatsMenu.DropDownItems.Clear();
+                    formatsMenu.DropDownItems.Add("Gérer / détecter les profils…", null, delegate { EditProfiles(); });
+                    foreach (GameProfile profile in snapshot.Settings.Profiles)
+                    {
+                        string id = profile.Id;
+                        ToolStripMenuItem group = new ToolStripMenuItem(profile.Name + (profile.Enabled ? "" : " · désactivé"));
+                        foreach (ScreenPreset preset in ScreenPreset.All)
+                        {
+                            int value = preset.Value;
+                            ToolStripMenuItem item = new ToolStripMenuItem(preset.Label) { Checked = value == profile.TargetMode };
+                            item.Click += delegate { SaveProfileTarget(id, value); };
+                            group.DropDownItems.Add(item);
+                        }
+                        formatsMenu.DropDownItems.Add(group);
+                    }
+                    profilesMenuSignature = signature;
+                }
                 tray.Icon = snapshot.Settings.Enabled ? activeIcon : inactiveIcon;
-                tray.Text = "AMZ.ScreenSize · " + (snapshot.Settings.Enabled ? "CS : " + ScreenPreset.Describe(snapshot.Settings.TargetMode) : "automatisme désactivé");
+                string tooltip = "AMZ.ScreenSize · " + (snapshot.Settings.Enabled ? snapshot.ActiveProfileName ?? "profils actifs" : "automatisme désactivé");
+                tray.Text = tooltip.Length > 63 ? tooltip.Substring(0, 60) + "…" : tooltip;
                 statusMenu.Text = snapshot.CurrentMode >= 0 ? "Écran : " + ScreenPreset.Describe(snapshot.CurrentMode) : "Écran indisponible";
             }
             finally { updatingMenu = false; }
         }
         public void ApplyManual(int value) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.ApplyManual(value); }, false); }
         public void SaveTarget(int value) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.SetTarget(value); }, false); }
+        public void SaveProfileTarget(string id, int value) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.SetProfileTarget(id, value); }, false); }
+        public void EditProfiles()
+        {
+            if (busy || quitting) return;
+            profilesEditorOpen = true;
+            try
+            {
+                using (ProfilesForm editor = new ProfilesForm(controller.Snapshot().Settings.Profiles, activeIcon))
+                    if (editor.ShowDialog(window) == DialogResult.OK)
+                    {
+                        List<GameProfile> profiles = editor.Result;
+                        RunOperation(delegate { controller.SetProfiles(profiles); }, false);
+                    }
+            }
+            finally { profilesEditorOpen = false; }
+        }
         public void SetEnabled(bool enabled) { nextAttempt = DateTime.MinValue; RunOperation(delegate { controller.SetEnabled(enabled); }, false); }
         public void RefreshMonitor() { nextAttempt = DateTime.MinValue; RunOperation(controller.Refresh, false); }
         public bool AutoUpdatesEnabled { get { return controller.Snapshot().Settings.AutoUpdate; } }
@@ -224,7 +266,7 @@ namespace AMZ.ScreenSize
                         {
                             pendingUpdate = plan;
                             updateMessage = "Version " + plan.Version + " prête";
-                            tray.ShowBalloonTip(4000, "AMZ.ScreenSize", "La version " + plan.Version + " est prête. L’installation automatique attend la fermeture de Counter-Strike.", ToolTipIcon.Info);
+                            tray.ShowBalloonTip(4000, "AMZ.ScreenSize", "La version " + plan.Version + " est prête. L’installation automatique attend la fermeture des jeux gérés.", ToolTipIcon.Info);
                         }
                         Render();
                     });

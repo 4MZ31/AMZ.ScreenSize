@@ -2,13 +2,15 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using System.Linq;
 
 namespace AMZ.ScreenSize
 {
     public interface IAppActions
     {
         void ApplyManual(int value);
-        void SaveTarget(int value);
+        void SaveProfileTarget(string id, int value);
+        void EditProfiles();
         void SetEnabled(bool enabled);
         void RefreshMonitor();
         bool StartupEnabled { get; }
@@ -31,6 +33,9 @@ namespace AMZ.ScreenSize
         private readonly CheckBox autoUpdates;
         private readonly Button checkUpdates;
         private readonly Label updateStatus;
+        private readonly ComboBox profileCombo;
+        private readonly Button manageProfiles;
+        private string profilesSignature;
         private bool rendering, busy;
         private AppSnapshot last;
         public bool AllowExit { get; set; }
@@ -63,8 +68,8 @@ namespace AMZ.ScreenSize
             BackColor = Color.FromArgb(245, 247, 249);
             ForeColor = Ink;
             AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(1000, 710);
-            MinimumSize = new Size(960, 740);
+            ClientSize = new Size(1000, 750);
+            MinimumSize = new Size(960, 780);
             StartPosition = FormStartPosition.CenterScreen;
 
             Panel header = new Panel { Dock = DockStyle.Top, Height = 96, Padding = new Padding(28, 12, 28, 10), BackColor = Color.White };
@@ -112,34 +117,42 @@ namespace AMZ.ScreenSize
             right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             right.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
             right.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
-            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 158));
+            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 194));
             preview = new ScreenPreview { Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0), BackColor = Color.White };
             right.Controls.Add(preview, 0, 0);
             selected = TextLabel("23\u2033 Wide (16:9)", 13, true);
             right.Controls.Add(selected, 0, 1);
             FlowLayoutPanel buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = new Padding(0), WrapContents = false };
             apply = ActionButton("Appliquer maintenant", true);
-            save = ActionButton("Utiliser pour CS", false);
+            save = ActionButton("Utiliser pour le profil", false);
             apply.Click += delegate { actions.ApplyManual(presets.SelectedIndex); };
-            save.Click += delegate { actions.SaveTarget(presets.SelectedIndex); };
+            save.Click += delegate { GameProfile profile = profileCombo.SelectedItem as GameProfile; if (profile != null) actions.SaveProfileTarget(profile.Id, presets.SelectedIndex); };
             buttons.Controls.Add(apply); buttons.Controls.Add(save); right.Controls.Add(buttons, 0, 2);
 
             TableLayoutPanel automation = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16, 8, 16, 8), BackColor = Color.White,
-                RowCount = 4, ColumnCount = 1, Margin = new Padding(0, 4, 0, 0) };
+                RowCount = 5, ColumnCount = 1, Margin = new Padding(0, 4, 0, 0) };
             automation.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            automation.RowStyles.Add(new RowStyle(SizeType.Absolute, 27));
-            automation.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-            automation.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            automation.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            automation.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            automation.RowStyles.Add(new RowStyle(SizeType.Absolute, 33));
+            automation.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
             automation.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            automation.Controls.Add(TextLabel("Counter-Strike", 11, true), 0, 0);
-            automatic = new CheckBox { Text = "Changer le format au lancement du jeu", Dock = DockStyle.Fill, AutoSize = false, Cursor = Cursors.Hand };
+            Panel profileHeader = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0) };
+            manageProfiles = ActionButton("Gérer / détecter…", false); manageProfiles.Dock = DockStyle.Right; manageProfiles.Width = 154; manageProfiles.Font = new Font("Segoe UI", 9);
+            manageProfiles.Click += delegate { actions.EditProfiles(); };
+            profileHeader.Controls.Add(TextLabel("Profils de jeux", 11, true)); profileHeader.Controls.Add(manageProfiles);
+            automation.Controls.Add(profileHeader, 0, 0);
+            automatic = new CheckBox { Text = "Activer les profils automatiques", Dock = DockStyle.Fill, AutoSize = false, Cursor = Cursors.Hand };
             automatic.CheckedChanged += delegate { if (!rendering) actions.SetEnabled(automatic.Checked); };
             automation.Controls.Add(automatic, 0, 1);
-            target = TextLabel("Format enregistré : 23\u2033 Wide (16:9)", 9.5f, false);
-            automation.Controls.Add(target, 0, 2);
-            Label restore = TextLabel("Le format précédent est restauré à la fermeture du jeu.", 9, false);
+            profileCombo = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Profil de jeu" };
+            profileCombo.SelectedIndexChanged += delegate { if (!rendering) UpdateButtons(); };
+            automation.Controls.Add(profileCombo, 0, 2);
+            target = TextLabel("Priorité au premier jeu détecté", 9, false); target.ForeColor = Muted;
+            automation.Controls.Add(target, 0, 3);
+            Label restore = TextLabel("Le format d’origine revient après le dernier jeu géré.", 9, false);
             restore.ForeColor = Muted;
-            automation.Controls.Add(restore, 0, 3);
+            automation.Controls.Add(restore, 0, 4);
             right.Controls.Add(automation, 0, 3);
             body.Controls.Add(left, 0, 0); body.Controls.Add(right, 1, 0);
 
@@ -193,18 +206,37 @@ namespace AMZ.ScreenSize
         {
             bool hasSelection = presets.SelectedIndex >= 0;
             apply.Enabled = !busy && hasSelection && (last == null || (!last.Settings.RestorePending && !(last.GameRunning && last.Settings.Enabled)));
-            save.Enabled = !busy && hasSelection && (last == null || presets.SelectedIndex != last.Settings.TargetMode);
+            GameProfile profile = profileCombo == null ? null : profileCombo.SelectedItem as GameProfile;
+            save.Enabled = !busy && hasSelection && profile != null && presets.SelectedIndex != profile.TargetMode;
         }
         public void Render(AppSnapshot snapshot, bool working)
         {
             last = snapshot; busy = working; rendering = true;
             try
             {
+                if (snapshot.Settings.Profiles == null) snapshot.Settings.Validate();
+                string signature = string.Join("|", snapshot.Settings.Profiles.Select(profile => profile.Id + ":" + profile.Name + ":" + profile.TargetMode + ":" + profile.Enabled));
+                if (signature != profilesSignature)
+                {
+                    GameProfile previous = profileCombo.SelectedItem as GameProfile;
+                    string selectedId = previous == null ? null : previous.Id;
+                    profileCombo.BeginUpdate();
+                    try
+                    {
+                        profileCombo.Items.Clear();
+                        foreach (GameProfile profile in snapshot.Settings.Profiles) profileCombo.Items.Add(profile.Copy());
+                        int index = snapshot.Settings.Profiles.FindIndex(profile => profile.Id == selectedId);
+                        profileCombo.SelectedIndex = index >= 0 ? index : profileCombo.Items.Count > 0 ? 0 : -1;
+                    }
+                    finally { profileCombo.EndUpdate(); }
+                    profilesSignature = signature;
+                }
+                profileCombo.Enabled = !working && profileCombo.Items.Count > 0; manageProfiles.Enabled = !working;
                 automatic.Checked = snapshot.Settings.Enabled;
                 automatic.Enabled = !working;
                 startup.Checked = actions.StartupEnabled; startup.Enabled = !working;
                 autoUpdates.Checked = snapshot.Settings.AutoUpdate; autoUpdates.Enabled = !working;
-                target.Text = "Format enregistré : " + ScreenPreset.Describe(snapshot.Settings.TargetMode);
+                target.Text = snapshot.ActiveProfileName == null ? "Priorité au premier jeu détecté" : "Jeu détecté : " + snapshot.ActiveProfileName;
                 current.Text = "Format actuel : " + (snapshot.CurrentMode >= 0 ? ScreenPreset.Describe(snapshot.CurrentMode) : "indisponible");
                 current.ForeColor = snapshot.Connected ? Ink : Color.FromArgb(163, 79, 38);
                 status.Text = working ? "Changement en cours…" : snapshot.Status;
