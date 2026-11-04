@@ -78,8 +78,10 @@ namespace AMZ.ScreenSize
             catalog.Controls.Add(list, 0, 0);
             catalogStatus = UiTheme.Label("Jeux installés et profils", 9.5f, "muted"); catalog.Controls.Add(catalogStatus, 0, 1);
             editor.Controls.Add(catalog, 0, 0);
-            fields = new Panel { Dock = DockStyle.Fill, Tag = "surface", Padding = new Padding(20, 12, 20, 12), Margin = new Padding(0) };
-            TableLayoutPanel form = UiTheme.Table(1, 24, 40, 28, 40, 40, 24, 40, 52, 0); form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            fields = new Panel { Dock = DockStyle.Fill, Tag = "surface", Padding = new Padding(20, 12, 20, 12), Margin = new Padding(0), AutoScroll = true };
+            TableLayoutPanel form = UiTheme.Table(1, 24, 40, 28, 40, 40, 24, 40, 52, 0);
+            form.Dock = DockStyle.Top; form.AutoSize = true; form.AutoSizeMode = AutoSizeMode.GrowAndShrink; form.MinimumSize = new Size(0, 288);
+            form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             form.Controls.Add(UiTheme.Label("Nom du jeu"), 0, 0);
             name = new TextBox { MaxLength = 80, AccessibleName = "Nom du jeu" }; form.Controls.Add(UiTheme.Input(name), 0, 1);
             form.Controls.Add(UiTheme.Label("Exécutables du jeu"), 0, 2);

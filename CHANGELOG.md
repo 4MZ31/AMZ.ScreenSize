@@ -1,6 +1,12 @@
 # Historique des versions
 
-## 2.0.1 — 2026-11-04
+## 2.0.2 — 2026-11-04
+
+- Éditeur de profils dimensionné selon son contenu et défilable lorsque la hauteur disponible est insuffisante.
+- Reprend les corrections de rendu et le catalogue intégré préparés en 2.0.1.
+- 114 assertions hors matériel ; contrôle des coordonnées de l’éditeur à taille minimale.
+
+## 2.0.1 — 2026-11-04 — non distribuée
 
 - Suppression des fonds noirs et des fragments de contrôles derrière les boutons et interrupteurs : peinture opaque complète, indépendante de la transparence native.
 - Navigation latérale prolongée jusqu’au bas de la fenêtre, y compris à côté de la barre d’état.

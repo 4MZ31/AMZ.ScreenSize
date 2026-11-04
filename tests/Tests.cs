@@ -330,6 +330,7 @@ internal static class Tests
             typeof(ProfilesPanel).GetField("detection", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(panel, Task.FromResult(new List<InstalledGame>()));
             form.Size = form.MinimumSize; form.Navigate(1); Application.DoEvents();
             UiSwitch profileSwitch = Field<UiSwitch>(panel, "enabled"); ComboBox profileFormat = Field<ComboBox>(panel, "format");
+            Console.WriteLine("Minimum editor: window=" + form.ClientSize + " format=" + profileFormat.Bounds + " switch=" + profileSwitch.Bounds + " editor=" + profileSwitch.Parent.ClientSize);
             Assert(profileSwitch.Top >= profileFormat.Bottom && profileSwitch.Bottom <= profileSwitch.Parent.ClientSize.Height, "profile switch stays below format and inside editor at minimum window size");
             form.AllowExit = true; form.Close();
         }

@@ -52,7 +52,7 @@ Segoe UI pour conserver une présence Windows native ; titres de 24 points, corp
 
 ### 6. Organisation
 
-Trois destinations persistantes : **Écran** pour choisir et appliquer, **Profils de jeux** pour gérer l’automatisme et les jeux, **Réglages** pour l’apparence, le démarrage, les mises à jour et le diagnostic. Depuis 2.0.1, profils et jeux installés partagent une liste recherchable à gauche. Sélection, création, ajout groupé et édition restent dans cette page, sans dialogue métier supplémentaire.
+Trois destinations persistantes : **Écran** pour choisir et appliquer, **Profils de jeux** pour gérer l’automatisme et les jeux, **Réglages** pour l’apparence, le démarrage, les mises à jour et le diagnostic. Depuis 2.0.2, profils et jeux installés partagent une liste recherchable à gauche. Sélection, création, ajout groupé et édition restent dans cette page, sans dialogue métier supplémentaire.
 
 ### 7. Détails et interactions
 
@@ -79,8 +79,8 @@ Retours natifs immédiats au survol, au clic, à la sélection et à la validati
 
 Les menus et boîtes système de sélection de fichiers restent gérés par Windows. La prise en charge DPI existante est conservée ; cette livraison ne prétend pas certifier toutes les combinaisons de moniteurs et de facteurs d’échelle.
 
-## Correctif 2.0.1 : rafraîchissement réel et sélection intégrée
+## Correctif 2.0.2 : rafraîchissement réel et sélection intégrée
 
 Les captures reçues après la version 2.0 montraient des fonds noirs et des fragments d’anciens contrôles, absents des rendus statiques initiaux. Les boutons et interrupteurs dessinent désormais explicitement tout leur fond opaque à chaque peinture, y compris en dehors de leurs coins arrondis. Leur fond ne dépend plus de la simulation de transparence WinForms. Les tests de régression commencent avec un tampon coloré et vérifient que le contrôle le recouvre entièrement aux emplacements attendus, dans les deux thèmes.
 
-La barre d’état appartient maintenant à l’espace de contenu ; elle ne raccourcit plus la navigation. La position du titre et de l’interrupteur de démarrage est contrôlée par un test de géométrie. L’espace Profils utilise le catalogue intégré décrit ci-dessus ; les tests couvrent la fusion des installations déjà configurées, la recherche, les choix groupés, leur annulation et le cas où l’enregistrement d’une suppression ne doit pas recréer le jeu sélectionné.
+La barre d’état appartient maintenant à l’espace de contenu ; elle ne raccourcit plus la navigation. La position du titre et de l’interrupteur de démarrage est contrôlée par un test de géométrie. L’éditeur de profils prend la hauteur de son contenu et devient défilable lorsque la fenêtre ne peut pas tout afficher. Les tests couvrent la taille minimale, la fusion des installations déjà configurées, la recherche, les choix groupés, leur annulation et le cas où l’enregistrement d’une suppression ne doit pas recréer le jeu sélectionné.
