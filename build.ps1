@@ -34,7 +34,7 @@ if ($Package) {
     $releaseExe = Join-Path $dist 'AMZ.ScreenSize.exe'
     Copy-Item -LiteralPath $exe -Destination $releaseExe -Force
     $zip = Join-Path $dist "AMZ.ScreenSize-v$version-win.zip"
-    Compress-Archive -LiteralPath $releaseExe,(Join-Path $root 'README.md'),(Join-Path $root 'LICENSE'),(Join-Path $root 'CHANGELOG.md') -DestinationPath $zip -Force
+    Compress-Archive -LiteralPath $releaseExe,(Join-Path $root 'README.md'),(Join-Path $root 'LICENSE'),(Join-Path $root 'CHANGELOG.md'),(Join-Path $root 'docs') -DestinationPath $zip -Force
     $hashes = @($releaseExe,$zip) | ForEach-Object { $hash = Get-FileHash -LiteralPath $_ -Algorithm SHA256; $hash.Hash.ToLowerInvariant() + '  ' + [IO.Path]::GetFileName($_) }
     [IO.File]::WriteAllLines((Join-Path $dist 'SHA256SUMS.txt'), $hashes, (New-Object Text.UTF8Encoding $false))
     Write-Output "Packaged $zip"
